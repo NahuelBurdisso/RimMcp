@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>RimMcp - Claude bridge</name>
+  <packageId>nahuel.rimmcp</packageId>
+  <author>Nahuel</author>
+  <supportedVersions>
+    <li>1.6</li>
+  </supportedVersions>
+  <description>Lets an AI assistant (Claude Code, or any MCP client) read your colony and give simple orders while you play.
+
+The mod opens a local-only endpoint (127.0.0.1, token-protected) and the bundled MCP server (Mcp/rimmcp_server.py) turns it into tools: colony status, colonists, resources, alerts, threats, game speed, drafting, work priorities, in-game messages and camera focus.
+
+Nothing leaves your computer unless your MCP client sends it.</description>
+</ModMetaData>
