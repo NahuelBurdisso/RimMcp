@@ -26,7 +26,11 @@ namespace RimMcp
 
     public class Pump : MonoBehaviour
     {
-        public void Update() => Bridge.DrainOnMainThread();
+        public void Update()
+        {
+            Bridge.DrainOnMainThread();
+            try { Tools.Tick(); } catch (System.Exception e) { Log.ErrorOnce("[RimMcp] auto-pause: " + e, 0x52a3c1); }
+        }
 
         public void OnApplicationQuit() => Bridge.Stop();
     }

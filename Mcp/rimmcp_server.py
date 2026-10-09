@@ -13,10 +13,11 @@ import glob
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
-SERVER_INFO = {"name": "rimworld", "version": "0.1.0"}
+SERVER_INFO = {"name": "rimworld", "version": "0.2.0"}
 PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 INSTRUCTIONS = (
@@ -66,7 +67,8 @@ TOOLS = [
                     "work type defName or label (Doctor, Cooking, Growing, Hauling...).",
      "inputSchema": {"type": "object", "properties": {
          "name": NAME, "work": {"type": "string"},
-         "priority": {"type": "integer", "minimum": 0, "maximum": 4}},
+         "priority": {"type": "integer", "minimum": 0, "maximum": 4},
+         "manual": {"type": "boolean", "description": "true turns on manual priorities (1-4) for the whole colony, like the Work tab checkbox"}},
          "required": ["name", "work", "priority"]}},
     {"name": "message", "read": False,
      "description": "Show a short message on the player's screen, prefixed with [Claude].",
@@ -74,6 +76,118 @@ TOOLS = [
     {"name": "focus", "read": False,
      "description": "Move the camera to a colonist and select them.",
      "inputSchema": {"type": "object", "properties": {"name": NAME}, "required": ["name"]}},
+]
+RECT = {"x": {"type": "integer"}, "z": {"type": "integer"},
+        "x2": {"type": "integer", "description": "opposite corner (inclusive); or use w/h"},
+        "z2": {"type": "integer"}, "w": {"type": "integer"}, "h": {"type": "integer"}}
+NAMES = {"names": {"type": "array", "items": {"type": "string"}, "description": "colonist names; omit or ['all'] for everyone"}}
+
+
+def obj(props, required=()):
+    return {"type": "object", "properties": props, "required": list(required)}
+
+
+TOOLS += [
+    {"name": "map_view", "read": True,
+     "description": "The current map as a text grid (north up) with a legend, plus a list of buildings, items and "
+                    "pawns with coordinates. No x/z = whole map (use step 4 or 5 for an overview). layers: main "
+                    "(things, zones, terrain), roof, fertility. Unexplored cells show as '?'.",
+     "inputSchema": obj({**RECT, "step": {"type": "integer", "default": 1},
+                         "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility"]}},
+                         "objects": {"type": "boolean"}, "maxObjects": {"type": "integer"}})},
+    {"name": "things", "read": True,
+     "description": "Find things on the map: by query (defName or label part), kind (item, building, plant, pawn, "
+                    "animal, hostile, blueprint) and optional rectangle. Gives id, position, forbidden/stored, growth.",
+     "inputSchema": obj({"query": {"type": "string"}, "kind": {"type": "string"}, "limit": {"type": "integer"}, **RECT})},
+    {"name": "designate", "read": False,
+     "description": "Apply a designation to every valid cell of a rectangle, exactly like dragging the tool in game: "
+                    "mine, cut, chop, harvest, hunt, tame, slaughter, deconstruct, uninstall, cancel, haul, smooth, "
+                    "remove_floor, claim, strip, forbid, unforbid, roof_build, roof_remove, home_add, home_remove.",
+     "inputSchema": obj({"type": {"type": "string"}, **RECT}, ["type", "x", "z"])},
+    {"name": "buildable", "read": True,
+     "description": "What can be built now (research and tech gates applied). No args: categories with counts. "
+                    "category (Structure, Furniture, Production, Power, Security, Joy, Temperature, Misc, Floors, "
+                    "Ship, Biotech...) or query: defs with cost, size, stuff options in stock, rotation.",
+     "inputSchema": obj({"category": {"type": "string"}, "query": {"type": "string"}})},
+    {"name": "build", "read": False,
+     "description": "Place blueprints of a buildable def (ThingDef or floor TerrainDef). 1x1 defs fill the rectangle "
+                    "(outline=true: only its border, for walls of a room); multi-cell defs place one at x,z (center). "
+                    "rot: north/east/south/west. stuff: material defName (WoodLog, Steel, BlocksGranite...).",
+     "inputSchema": obj({"def": {"type": "string"}, **RECT, "rot": {"type": "string"}, "stuff": {"type": "string"},
+                         "outline": {"type": "boolean"}}, ["def", "x", "z"])},
+    {"name": "zones", "read": True,
+     "description": "All zones (growing with plant, stockpiles with priority, bounds) and areas (home, roof, allowed).",
+     "inputSchema": obj({})},
+    {"name": "zone", "read": False,
+     "description": "Zones and allowed areas. action: grow (plant defName, default Plant_Potato) | stockpile | dumping "
+                    "(optional only/allow/disallow lists of ThingCategoryDef or ThingDef, priority) | set_plant (zone, plant) "
+                    "| set_filter (zone, only/allow/disallow, priority) | delete (zone) | remove_cells (rect) | area_new "
+                    "(label, rect) | area_add / area_remove (area, rect) | area_delete (area). Home area and roofs: designate.",
+     "inputSchema": obj({"action": {"type": "string"}, **RECT, "zone": {"type": "string"}, "plant": {"type": "string"},
+                         "label": {"type": "string"}, "area": {"type": "string"},
+                         "only": {"type": "array", "items": {"type": "string"}},
+                         "allow": {"type": "array", "items": {"type": "string"}},
+                         "disallow": {"type": "array", "items": {"type": "string"}},
+                         "priority": {"type": "string", "enum": ["Low", "Normal", "Preferred", "Important", "Critical"]}},
+                        ["action"])},
+    {"name": "research", "read": False,
+     "description": "No args: current project and every project that can start now (cost, tech level, bench needed). "
+                    "set: defName or label to research. finished=true also lists finished projects.",
+     "inputSchema": obj({"set": {"type": "string"}, "finished": {"type": "boolean"}})},
+    {"name": "bills", "read": False,
+     "description": "Workbench bills. action list (no bench = all benches), add (recipe; target = do until you have X, "
+                    "or count, or forever), remove/suspend/resume/set (index). bench = id or defName, or x,z of the bench.",
+     "inputSchema": obj({"action": {"type": "string"}, "bench": {"type": "string"}, "x": {"type": "integer"},
+                         "z": {"type": "integer"}, "recipe": {"type": "string"}, "target": {"type": "integer"},
+                         "count": {"type": "integer"}, "forever": {"type": "boolean"}, "index": {"type": "integer"}})},
+    {"name": "forbid", "read": False,
+     "description": "Forbid (forbidden=true) or allow (false) things: by id, or all forbiddable things in a rectangle "
+                    "(optional query filter).",
+     "inputSchema": obj({"forbidden": {"type": "boolean", "default": True}, "id": {"type": "string"},
+                         "query": {"type": "string"}, **RECT})},
+    {"name": "allow_area", "read": False,
+     "description": "Restrict colonists to an allowed area (label from zones) or 'none' to unrestrict.",
+     "inputSchema": obj({**NAMES, "area": {"type": "string"}}, ["area"])},
+    {"name": "schedule", "read": False,
+     "description": "Read or set daily schedules. schedule = 24 chars for hours 0..23: S sleep, W work, J joy, "
+                    "A anything, M meditate. E.g. SSSSSSAWWWWWWWWWWWWJJJSS.",
+     "inputSchema": obj({**NAMES, "schedule": {"type": "string"}})},
+    {"name": "pawn_settings", "read": False,
+     "description": "Read or set per-colonist settings: hostility (Ignore/Attack/Flee), medicine (NoCare, NoMeds, "
+                    "HerbalOrWorse, NormalOrWorse, Best), selfTend. Also shows area and schedule.",
+     "inputSchema": obj({**NAMES, "hostility": {"type": "string"}, "medicine": {"type": "string"}, "selfTend": {"type": "boolean"}})},
+    {"name": "drafted_move", "read": False,
+     "description": "Draft colonists (if needed) and order them to a cell; several colonists spread over nearby cells. "
+                    "Drafted colonists with ranged weapons shoot enemies in range by themselves.",
+     "inputSchema": obj({**NAMES, "x": {"type": "integer"}, "z": {"type": "integer"}}, ["x", "z"])},
+    {"name": "orders", "read": False,
+     "description": "The right-click menu of one colonist at a cell: without choose, lists the options (attack, rescue, "
+                    "tend, equip, prioritize building/hauling, trade with, arrest...); choose = index or text part.",
+     "inputSchema": obj({"name": NAME, "x": {"type": "integer"}, "z": {"type": "integer"}, "choose": {"type": "string"}},
+                        ["name", "x", "z"])},
+    {"name": "run", "read": False,
+     "description": "Unpause for some in-game hours at a speed, then pause again. Stops early on threat/death/negative "
+                    "letters, choice letters or dialogs. Waits up to wait_seconds (real time) and returns the status, "
+                    "why it stopped, new alerts and open decisions.",
+     "inputSchema": obj({"hours": {"type": "number", "default": 2}, "speed": {"type": "string", "enum": ["normal", "fast", "superfast"]},
+                         "wait_seconds": {"type": "number", "default": 60}})},
+    {"name": "save", "read": False,
+     "description": "Save the game (a normal save file, like the save menu). name optional.",
+     "inputSchema": obj({"name": {"type": "string"}})},
+    {"name": "dialogs", "read": True,
+     "description": "Everything waiting for a decision: open dialogs with their options, letters (with options when "
+                    "they are choice letters), quest offers with rewards and expiry, ongoing quests.",
+     "inputSchema": obj({})},
+    {"name": "choose", "read": False,
+     "description": "Answer a decision from dialogs: window + option (index or text; message boxes A/B/C; 'close'), "
+                    "letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
+     "inputSchema": obj({"window": {"type": "integer"}, "letter": {"type": "integer"}, "quest": {"type": "integer"},
+                         "option": {"type": "string"}, "reward": {"type": "integer"}, "accepter": {"type": "string"}})},
+    {"name": "trade", "read": False,
+     "description": "The open trade screen. action list (query filter), set (index, count: >0 buy, <0 sell), reset, "
+                    "execute, cancel.",
+     "inputSchema": obj({"action": {"type": "string"}, "index": {"type": "integer"}, "count": {"type": "integer"},
+                         "query": {"type": "string"}})},
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
@@ -145,11 +259,42 @@ def call_game(tool, args):
                 raise GameDown("RimWorld stopped answering.")
 
 
+def run_and_wait(args):
+    """run: unpause in the game, then poll until it pauses again (or wait_seconds pass)."""
+    wait = float(args.pop("wait_seconds", 60) or 60)
+    reply = call_game("run", args)
+    if not reply.get("ok"):
+        return reply
+    t0 = time.time()
+    status = None
+    while time.time() - t0 < wait:
+        time.sleep(1.0)
+        st = call_game("status", {})
+        if st.get("ok") and st["result"].get("paused"):
+            status = st["result"]
+            break
+    stopped = None
+    if status is None:
+        call_game("set_speed", {"speed": "pause"})
+        status = call_game("status", {}).get("result")
+        stopped = f"still running after {wait:.0f}s real time; paused it"
+    dialogs = call_game("dialogs", {}).get("result") or {}
+    alerts = call_game("alerts", {}).get("result") or {}
+    return {"ok": True, "result": {
+        "stoppedBecause": stopped or dialogs.get("lastAutoPause") or "paused",
+        "status": status,
+        "alerts": [f"{a['alert']} ({a['priority']})" for a in alerts.get("alerts", [])],
+        "messages": alerts.get("messages", []),
+        "decisions": {k: dialogs.get(k) for k in ("windows", "questOffers") if dialogs.get(k)},
+        "letters": [f"{l['id']}: {l['label']} [{l['type']}]" for l in dialogs.get("letters", [])],
+    }}
+
+
 def run_tool(name, args):
     if name not in TOOL_NAMES:
         return f"unknown tool {name}", True
     try:
-        reply = call_game(name, args or {})
+        reply = run_and_wait(dict(args or {})) if name == "run" else call_game(name, args or {})
     except GameDown as e:
         if name == "status":
             return json.dumps({"running": False, "detail": str(e)}), False
@@ -208,5 +353,17 @@ def main():
             stdout.flush()
 
 
+def cli(argv):
+    """python rimmcp_server.py call <tool> ['{json args}']: one call, prints the result."""
+    tool = argv[0]
+    args = json.loads(argv[1]) if len(argv) > 1 else {}
+    text, is_error = run_tool(tool, args)
+    sys.stdout.reconfigure(encoding="utf-8")
+    print(("ERROR: " if is_error else "") + text)
+    return 1 if is_error else 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == "call":
+        sys.exit(cli(sys.argv[2:]))
     main()

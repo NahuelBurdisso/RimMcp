@@ -9,7 +9,7 @@ using Verse;
 namespace RimMcp
 {
     // Every tool runs on the main thread (see Bridge). Results are plain dictionaries/lists.
-    public static class Tools
+    public static partial class Tools
     {
         static readonly Dictionary<string, Func<Dictionary<string, object>, object>> handlers =
             new Dictionary<string, Func<Dictionary<string, object>, object>>
@@ -328,6 +328,14 @@ namespace RimMcp
             if (!a.TryGetValue("priority", out var pv) || !(pv is double pd) || pd < 0 || pd > 4)
                 throw new ToolError("priority must be 0 (off) to 4");
             if (p.WorkTypeIsDisabled(w)) throw new ToolError($"{p.LabelShort} is incapable of {w.labelShort}");
+            if (a.TryGetValue("manual", out var mv) && mv is bool manual && manual != Find.PlaySettings.useWorkPriorities)
+            {
+                // same as ticking "Manual priorities" in the Work tab
+                Find.PlaySettings.useWorkPriorities = manual;
+                foreach (var pawn in PawnsFinder.AllMapsWorldAndTemporary_Alive)
+                    if (pawn.Faction == Faction.OfPlayer && pawn.workSettings != null)
+                        pawn.workSettings.Notify_UseWorkPrioritiesChanged();
+            }
             p.workSettings.SetPriority(w, (int)pd);
             // Without manual priorities the game treats any priority > 0 as plain "on" (shown as 3).
             // Switching that mode is the player's call, so only report it.

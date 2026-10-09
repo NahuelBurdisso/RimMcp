@@ -1,6 +1,6 @@
 # RimMcp - Claude bridge
 
-Lets Claude Code (or any MCP client) read a running RimWorld 1.6 game and give simple orders.
+Lets Claude Code (or any MCP client) read and play a running RimWorld 1.6 game.
 
 ```
 Claude Code --stdio--> Mcp/rimmcp_server.py --HTTP 127.0.0.1--> RimMcp mod (in game)
@@ -29,6 +29,23 @@ Claude Code --stdio--> Mcp/rimmcp_server.py --HTTP 127.0.0.1--> RimMcp mod (in g
 | `set_work_priority` | 0-4 (does not switch the game's manual-priorities mode) |
 | `message` | show a `[Claude]` message on screen |
 | `focus` | jump the camera to a colonist and select them |
+| `map_view` | map as a text grid (main / roof / fertility layers, `step` for overviews) + objects with coordinates |
+| `things` | find things by def/label, kind and rectangle |
+| `designate` | mine, cut, chop, harvest, hunt, tame, slaughter, deconstruct, uninstall, cancel, haul, smooth, remove_floor, claim, strip, forbid, unforbid, roof_build, roof_remove, home_add, home_remove over a rectangle |
+| `buildable` / `build` | what can be built now; place blueprints (rotation, material, room outlines) |
+| `zones` / `zone` | list zones and areas; growing zones, stockpiles with filters/priority, allowed areas |
+| `research` | available projects; choose the current one |
+| `bills` | list/add/remove/suspend workbench bills (count, until you have X, forever) |
+| `forbid`, `allow_area`, `schedule`, `pawn_settings` | forbid/allow, area restriction, 24-hour schedules, hostility/medicine |
+| `drafted_move`, `orders` | move drafted colonists; any right-click order of a colonist at a cell |
+| `run` | unpause for N in-game hours, auto-pause on threats, deaths, choice letters and dialogs |
+| `save` | save the game |
+| `dialogs` / `choose` | open dialogs, letters and quest offers; answer them |
+| `trade` | the open trade screen: list, set counts, execute, cancel |
+
+Every action uses the game's own checks (designators, `GenConstruct`, research gates) and
+returns an error saying why instead of failing silently. The MCP server also works as a CLI:
+`python Mcp/rimmcp_server.py call <tool> '{"arg": 1}'`.
 
 ## Use
 
