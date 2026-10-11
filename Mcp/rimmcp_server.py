@@ -224,12 +224,17 @@ TOOLS.append(
      "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}})})
 TOOLS.append(
     {"name": "power", "read": True,
-     "description": "Power nets: net gain in watts, stored energy, batteries, producers and consumers.",
+     "description": "Power nets: net gain in watts, stored energy, batteries, producers, consumers, and every device that is off with the reason (switched off, broken down, out of fuel, no power).",
      "inputSchema": obj({})})
 TOOLS.append(
     {"name": "thermostat", "read": False,
      "description": "Heater/cooler at x,z: read or set target temperature in C (freezer: -10).",
      "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}, "target": {"type": "number"}}, ["x", "z"])})
+TOOLS.append(
+    {"name": "switch", "read": False,
+     "description": "Turn a switchable building (cooler, heater, lamp, turret, power switch...) at x,z on or off; "
+                    "a colonist walks over and flicks it, as with the in-game toggle.",
+     "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}, "on": {"type": "boolean", "default": True}}, ["x", "z"])})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 

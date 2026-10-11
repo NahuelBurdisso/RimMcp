@@ -45,6 +45,7 @@ namespace RimMcp
                 ["rooms"] = Rooms,
                 ["power"] = Power,
                 ["thermostat"] = Thermostat,
+                ["switch"] = Switch,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }
@@ -1124,6 +1125,34 @@ namespace RimMcp
             return new Dictionary<string, object> { ["thing"] = comp.parent.LabelCap.ToString(), ["targetC"] = comp.TargetTemperature };
         }
 
+        static string OffReason(CompPowerTrader c)
+        {
+            var flick = c.parent.TryGetComp<CompFlickable>();
+            if (flick != null && !flick.SwitchIsOn) return "switched off";
+            var br = c.parent.TryGetComp<CompBreakdownable>();
+            if (br != null && br.BrokenDown) return "broken down (repair needs 1 component)";
+            var fuel = c.parent.TryGetComp<CompRefuelable>();
+            if (fuel != null && !fuel.HasFuel) return "out of fuel";
+            return "no power";
+        }
+
+        // x,z: turn a switchable building on/off. Like the gizmo: a colonist walks over and flicks it.
+        static object Switch(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var c = Cell(a, map);
+            var flick = c.GetThingList(map).Select(t => t.TryGetComp<CompFlickable>()).FirstOrDefault(f => f != null)
+                        ?? throw new ToolError("nothing switchable at that cell");
+            bool on = Bool(a, "on", true);
+            typeof(CompFlickable).GetField("wantSwitchOn", Inst).SetValue(flick, on);
+            FlickUtility.UpdateFlickDesignation(flick.parent);
+            return new Dictionary<string, object>
+            {
+                ["thing"] = flick.parent.LabelCap.ToString(), ["switchIsOn"] = flick.SwitchIsOn, ["wantOn"] = on,
+                ["note"] = flick.SwitchIsOn == on ? "already in that state" : "a colonist will go and flick it",
+            };
+        }
+
         static object Power(Dictionary<string, object> a)
         {
             var map = CurMap();
@@ -1133,7 +1162,8 @@ namespace RimMcp
                 ["storedWd"] = Math.Round(n.CurrentStoredEnergy()),
                 ["batteries"] = n.batteryComps.Count,
                 ["producers"] = n.powerComps.Where(c => c.PowerOutput > 0).Select(c => (object)$"{c.parent.LabelCap} {Math.Round(c.PowerOutput)}W").ToList(),
-                ["consumers"] = n.powerComps.Where(c => c.PowerOutput < 0).GroupBy(c => c.parent.def.label).Select(g => (object)$"{g.Count()}x {g.Key} {Math.Round(g.Sum(c => -c.PowerOutput))}W{(g.Any(c => !c.PowerOn) ? " (some off)" : "")}").ToList(),
+                ["consumers"] = n.powerComps.Where(c => c.PowerOutput < 0 || !c.PowerOn && c.Props.PowerConsumption > 0).GroupBy(c => c.parent.def.label).Select(g => (object)$"{g.Count()}x {g.Key} {Math.Round(g.Sum(c => -c.PowerOutput))}W").ToList(),
+                ["off"] = n.powerComps.Where(c => !c.PowerOn).Select(c => (object)$"{c.parent.LabelCap} at ({c.parent.Position.x},{c.parent.Position.z}): {OffReason(c)}").ToList(),
             }).ToList();
         }
 
