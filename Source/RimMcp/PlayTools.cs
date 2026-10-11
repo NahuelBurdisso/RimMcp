@@ -39,6 +39,7 @@ namespace RimMcp
                 ["dialogs"] = Dialogs,
                 ["choose"] = Choose,
                 ["trade"] = Trade,
+                ["newgame"] = NewGame,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }

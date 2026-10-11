@@ -189,6 +189,22 @@ TOOLS += [
      "inputSchema": obj({"action": {"type": "string"}, "index": {"type": "integer"}, "count": {"type": "integer"},
                          "query": {"type": "string"}})},
 ]
+TOOLS.append(
+    {"name": "newgame", "read": False,
+     "description": "Drive the New colony pages from the main menu. action: state | devmode_off | open (Page_SelectScenario) "
+                    "| set (scenario=name; storyteller, difficulty, permadeath; seed, planetCoverage; tile; ideo=classic; "
+                    "reroll=[i..], swap=[i,j], index+nick) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
+                    "river, coastal, feature, limit) | next | back | confirm | cancel (confirmation boxes).",
+     "inputSchema": obj({"action": {"type": "string"}, "scenario": {"type": "string"}, "storyteller": {"type": "string"},
+                         "difficulty": {"type": "string"}, "permadeath": {"type": "boolean"}, "seed": {"type": "string"},
+                         "planetCoverage": {"type": "number"}, "tile": {"type": "integer"}, "ideo": {"type": "string"},
+                         "reroll": {"type": "array", "items": {"type": "integer"}},
+                         "swap": {"type": "array", "items": {"type": "integer"}}, "index": {"type": "integer"},
+                         "nick": {"type": "string"}, "biome": {"type": "string"},
+                         "hilliness": {"type": "array", "items": {"type": "string"}}, "minTemp": {"type": "number"},
+                         "maxTemp": {"type": "number"}, "minGrowingTwelfths": {"type": "integer"},
+                         "river": {"type": "boolean"}, "coastal": {"type": "boolean"}, "feature": {"type": "string"},
+                         "limit": {"type": "integer"}})})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 
