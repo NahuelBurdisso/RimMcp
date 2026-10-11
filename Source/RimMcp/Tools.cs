@@ -205,7 +205,11 @@ namespace RimMcp
             var loose = Tally(looseThings.Where(t => !t.IsForbidden(Faction.OfPlayer)));
             var looseForbidden = Tally(looseThings.Where(t => t.IsForbidden(Faction.OfPlayer)));
             var colonists = map.mapPawns.FreeColonistsSpawnedCount;
-            var nutrition = map.resourceCounter.TotalHumanEdibleNutrition;
+            // stored food (what the game counts) + loose, allowed, human-edible food lying around
+            var looseFood = looseThings.Where(t => !t.IsForbidden(Faction.OfPlayer) && t.def.IsNutritionGivingIngestible &&
+                                                   t.def.ingestible.HumanEdible && !(t is Corpse))
+                .Sum(t => t.GetStatValue(StatDefOf.Nutrition) * t.stackCount);
+            var nutrition = map.resourceCounter.TotalHumanEdibleNutrition + looseFood;
             return new Dictionary<string, object>
             {
                 ["map"] = map.Parent?.LabelCap.ToString(),
@@ -255,7 +259,7 @@ namespace RimMcp
             foreach (var map in Find.Maps)
             {
                 var hostiles = map.mapPawns.AllPawnsSpawned
-                    .Where(p => !p.Dead && !p.Downed && p.HostileTo(Faction.OfPlayer))
+                    .Where(p => !p.Dead && !p.Downed && p.HostileTo(Faction.OfPlayer) && !p.Fogged())
                     .GroupBy(p => (faction: p.Faction?.Name ?? "wild", kind: p.KindLabel))
                     .Select(g => (object)new Dictionary<string, object>
                     {

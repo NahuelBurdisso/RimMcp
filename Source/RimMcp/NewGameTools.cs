@@ -70,6 +70,17 @@ namespace RimMcp
                     return PageState();
                 }
                 case "set": return PageSet(a);
+                case "saves":
+                    return GenFilePaths.AllSavedGameFiles.OrderByDescending(f => f.LastWriteTime).Take(15)
+                        .Select(f => (object)$"{System.IO.Path.GetFileNameWithoutExtension(f.Name)} ({f.LastWriteTime:yyyy-MM-dd HH:mm})").ToList();
+                case "load":
+                {
+                    if (Current.ProgramState != ProgramState.Entry) throw new ToolError("load only from the main menu");
+                    var name = Str(a, "name");
+                    if (!SaveGameFilesUtility.SavedGameNamedExists(name)) throw new ToolError("no save named " + name);
+                    GameDataSaveLoader.CheckVersionAndLoadGame(name);
+                    return "loading " + name;
+                }
                 case "tiles": return FindTiles(a);
                 default: throw new ToolError("action: state, devmode_off, open, set, tiles, next, back, confirm, cancel");
             }

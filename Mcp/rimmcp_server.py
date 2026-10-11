@@ -119,7 +119,7 @@ TOOLS += [
      "description": "All zones (growing with plant, stockpiles with priority, bounds) and areas (home, roof, allowed).",
      "inputSchema": obj({})},
     {"name": "zone", "read": False,
-     "description": "Zones and allowed areas. action: grow (plant defName, default Plant_Potato) | stockpile | dumping "
+     "description": "Zones and allowed areas. action: grow (plant defName, default Plant_Potato) | fishing (rect over water) | stockpile | dumping "
                     "(optional only/allow/disallow lists of ThingCategoryDef or ThingDef, priority) | set_plant (zone, plant) "
                     "| set_filter (zone, only/allow/disallow, priority) | delete (zone) | remove_cells (rect) | area_new "
                     "(label, rect) | area_add / area_remove (area, rect) | area_delete (area). Home area and roofs: designate.",
@@ -180,9 +180,10 @@ TOOLS += [
      "inputSchema": obj({})},
     {"name": "choose", "read": False,
      "description": "Answer a decision from dialogs: window + option (index or text; message boxes A/B/C; 'close'), "
-                    "letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
+                    "name dialogs: option 'name' + name (+ second); letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
      "inputSchema": obj({"window": {"type": "integer"}, "letter": {"type": "integer"}, "quest": {"type": "integer"},
-                         "option": {"type": "string"}, "reward": {"type": "integer"}, "accepter": {"type": "string"}})},
+                         "option": {"type": "string"}, "reward": {"type": "integer"}, "accepter": {"type": "string"},
+                         "name": {"type": "string"}, "second": {"type": "string"}})},
     {"name": "trade", "read": False,
      "description": "The open trade screen. action list (query filter), set (index, count: >0 buy, <0 sell), reset, "
                     "execute, cancel.",
@@ -191,7 +192,7 @@ TOOLS += [
 ]
 TOOLS.append(
     {"name": "newgame", "read": False,
-     "description": "Drive the New colony pages from the main menu. action: state | devmode_off | open (Page_SelectScenario) "
+     "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | open (Page_SelectScenario) "
                     "| set (scenario=name; storyteller, difficulty, permadeath; seed, planetCoverage; tile; ideo=classic; "
                     "reroll=[i..], swap=[i,j], index+nick) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
                     "river, coastal, feature, limit) | next | back | confirm | cancel (confirmation boxes).",
@@ -200,11 +201,35 @@ TOOLS.append(
                          "planetCoverage": {"type": "number"}, "tile": {"type": "integer"}, "ideo": {"type": "string"},
                          "reroll": {"type": "array", "items": {"type": "integer"}},
                          "swap": {"type": "array", "items": {"type": "integer"}}, "index": {"type": "integer"},
-                         "nick": {"type": "string"}, "biome": {"type": "string"},
+                         "nick": {"type": "string"}, "name": {"type": "string"}, "biome": {"type": "string"},
                          "hilliness": {"type": "array", "items": {"type": "string"}}, "minTemp": {"type": "number"},
                          "maxTemp": {"type": "number"}, "minGrowingTwelfths": {"type": "integer"},
                          "river": {"type": "boolean"}, "coastal": {"type": "boolean"}, "feature": {"type": "string"},
                          "limit": {"type": "integer"}})})
+TOOLS.append(
+    {"name": "bed", "read": False,
+     "description": "A finished bed (id or x,z): type colonist|prisoner|slave (whole room, like the bed gizmo), "
+                    "medical true/false, owner = colonist name or 'none'. Without changes: shows its state.",
+     "inputSchema": obj({"id": {"type": "string"}, "x": {"type": "integer"}, "z": {"type": "integer"},
+                         "type": {"type": "string"}, "medical": {"type": "boolean"}, "owner": {"type": "string"}})})
+TOOLS.append(
+    {"name": "prisoners", "read": False,
+     "description": "Prisoners with resistance, will, mode, traits, good skills. name + mode sets the interaction "
+                    "(AttemptRecruit, MaintainOnly, ReduceResistance, Release, Enslave, ReduceWill, Convert...).",
+     "inputSchema": obj({"name": {"type": "string"}, "mode": {"type": "string"}})})
+TOOLS.append(
+    {"name": "rooms", "read": True,
+     "description": "Rooms: role, temperature, impressiveness, beauty, cleanliness, space, owners, bounds. x,z = one room; "
+                    "no args = every enclosed room in the home area.",
+     "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}})})
+TOOLS.append(
+    {"name": "power", "read": True,
+     "description": "Power nets: net gain in watts, stored energy, batteries, producers and consumers.",
+     "inputSchema": obj({})})
+TOOLS.append(
+    {"name": "thermostat", "read": False,
+     "description": "Heater/cooler at x,z: read or set target temperature in C (freezer: -10).",
+     "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}, "target": {"type": "number"}}, ["x", "z"])})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 

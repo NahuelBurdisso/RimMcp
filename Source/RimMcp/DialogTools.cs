@@ -86,6 +86,12 @@ namespace RimMcp
                     d["buttons"] = b;
                 }
                 else if (w is Dialog_Trade) d["note"] = "trade screen open: use the trade tool";
+                else if (w is Dialog_GiveName gn)
+                {
+                    d["suggestedName"] = GetField(gn, "curName");
+                    if ((bool)GetField(gn, "useSecondName")) d["suggestedSecondName"] = GetField(gn, "curSecondName");
+                    d["note"] = "answer with choose window=N option=name name=... (second=... when there is a second name)";
+                }
                 else
                 {
                     d["title"] = Clean(w.optionalTitle);
@@ -166,6 +172,20 @@ namespace RimMcp
                     }
                     else res["windowClosed"] = !nt.IsOpen;
                     return res;
+                }
+                if (w is Dialog_GiveName gn && opt == "name")
+                {
+                    var t = gn.GetType();
+                    var first = (Str(a, "name", false) ?? (string)GetField(gn, "curName"))?.Trim();
+                    var useSecond = (bool)GetField(gn, "useSecondName");
+                    var second = (Str(a, "second", false) ?? (string)GetField(gn, "curSecondName"))?.Trim();
+                    bool Valid(string m, string v) => (bool)t.GetMethod(m, Inst).Invoke(gn, new object[] { v });
+                    if (!Valid("IsValidName", first)) throw new ToolError($"invalid name '{first}'");
+                    if (useSecond && !Valid("IsValidSecondName", second)) throw new ToolError($"invalid second name '{second}'");
+                    t.GetMethod("Named", Inst).Invoke(gn, new object[] { first });
+                    if (useSecond) t.GetMethod("NamedSecond", Inst).Invoke(gn, new object[] { second });
+                    Find.WindowStack.TryRemove(gn);
+                    return "named " + first + (useSecond ? " / " + second : "");
                 }
                 if (w is Dialog_MessageBox mb)
                 {

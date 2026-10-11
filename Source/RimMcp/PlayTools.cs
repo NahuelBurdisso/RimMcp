@@ -40,6 +40,11 @@ namespace RimMcp
                 ["choose"] = Choose,
                 ["trade"] = Trade,
                 ["newgame"] = NewGame,
+                ["bed"] = Bed,
+                ["prisoners"] = Prisoners,
+                ["rooms"] = Rooms,
+                ["power"] = Power,
+                ["thermostat"] = Thermostat,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }
@@ -515,7 +520,7 @@ namespace RimMcp
                 if (placed.Count == 1) r["occupies"] = GenAdj.OccupiedRect(rect.Min, des.Rot, size) is var occ ? new Dictionary<string, object> { ["x"] = occ.minX, ["z"] = occ.minZ, ["x2"] = occ.maxX, ["z2"] = occ.maxZ } : null;
             }
             if (placed.Count <= 6) r["cells"] = placed;
-            if (des.StuffDef != null && map.resourceCounter.GetCount(des.StuffDef) == 0) r["warning"] = $"no {des.StuffDef.label} stored on the map: these blueprints wait until you get some";
+            if (des.StuffDef != null && !map.listerThings.ThingsOfDef(des.StuffDef).Any(t => !t.IsForbidden(Faction.OfPlayer))) r["warning"] = $"no usable {des.StuffDef.label} on the map: these blueprints wait until you get some";
             if (reasons.Count > 0) r["rejected"] = ReasonsObj(reasons);
             return r;
         }
@@ -557,6 +562,26 @@ namespace RimMcp
             {
                 case "grow": case "growing": return MakeGrowing(a, map);
                 case "stockpile": case "dumping": return MakeStockpile(a, map, action == "dumping");
+                case "fishing":
+                {
+                    if (!ModsConfig.OdysseyActive) throw new ToolError("fishing zones need Odyssey");
+                    var des = new Designator_ZoneAdd_Fishing();
+                    if (!des.Visible) throw new ToolError("fishing zones need the Fishing research");
+                    var cells = new List<IntVec3>();
+                    var reasons = new Dictionary<string, int>();
+                    foreach (var c in Rect(a, map, 5000))
+                    {
+                        var rep = des.CanDesignateCell(c);
+                        if (rep.Accepted && map.zoneManager.ZoneAt(c) == null) cells.Add(c); else if (!rep.Accepted) AddReason(reasons, rep);
+                    }
+                    if (cells.Count == 0) throw new ToolError("no valid fishing cells. " + string.Join("; ", reasons.Select(kv => kv.Key + ": " + kv.Value)));
+                    Find.Selector.ClearSelection();
+                    var before = new HashSet<Zone>(map.zoneManager.AllZones);
+                    des.DesignateMultiCell(cells);
+                    var z = map.zoneManager.AllZones.FirstOrDefault(x => !before.Contains(x));
+                    Find.Selector.ClearSelection();
+                    return new Dictionary<string, object> { ["zone"] = z?.label, ["cells"] = z?.cells.Count ?? 0, ["skipped"] = ReasonsObj(reasons) };
+                }
                 case "set_plant":
                 {
                     var z = FindZone(map, Str(a, "zone")) as Zone_Growing ?? throw new ToolError("not a growing zone");
@@ -1050,6 +1075,143 @@ namespace RimMcp
             return $"{p.LabelShort}: {Clean(pick.Label)}";
         }
 
+        // ------------------------------------------------------------------ rooms and power
+
+        static Dictionary<string, object> RoomInfo(Room room)
+        {
+            var cr = CellRect.FromCellList(room.Cells.ToList());
+            return new Dictionary<string, object>
+            {
+                ["role"] = room.Role?.label, ["cells"] = room.CellCount, ["tempC"] = Math.Round(room.Temperature, 1),
+                ["impressiveness"] = Math.Round(room.GetStat(RoomStatDefOf.Impressiveness), 1),
+                ["beauty"] = Math.Round(room.GetStat(RoomStatDefOf.Beauty), 2),
+                ["cleanliness"] = Math.Round(room.GetStat(RoomStatDefOf.Cleanliness), 2),
+                ["space"] = Math.Round(room.GetStat(RoomStatDefOf.Space), 1),
+                ["owners"] = room.Owners.Select(p => (object)p.LabelShort).ToList(),
+                ["bounds"] = new Dictionary<string, object> { ["x"] = cr.minX, ["z"] = cr.minZ, ["x2"] = cr.maxX, ["z2"] = cr.maxZ },
+            };
+        }
+
+        // x,z: the room at that cell; otherwise every enclosed room of the colony (home area).
+        static object Rooms(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            if (a.ContainsKey("x"))
+            {
+                var room = Cell(a, map).GetRoom(map) ?? throw new ToolError("no room there");
+                return RoomInfo(room);
+            }
+            var seen = new HashSet<Room>();
+            var res = new List<object>();
+            foreach (var c in map.areaManager.Home.ActiveCells)
+            {
+                var room = c.GetRoom(map);
+                if (room == null || room.PsychologicallyOutdoors || room.IsHuge || room.CellCount <= 1 || !seen.Add(room)) continue;
+                res.Add(RoomInfo(room));
+            }
+            return res;
+        }
+
+        // heater/cooler at x,z: set target temperature (C)
+        static object Thermostat(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var c = Cell(a, map);
+            var comp = c.GetThingList(map).Select(t => t.TryGetComp<CompTempControl>()).FirstOrDefault(tc => tc != null)
+                       ?? throw new ToolError("no heater/cooler/vent with a thermostat at that cell");
+            if (a.TryGetValue("target", out var tv) && tv is double t)
+                comp.TargetTemperature = Mathf.Clamp((float)t, -50f, 50f);
+            return new Dictionary<string, object> { ["thing"] = comp.parent.LabelCap.ToString(), ["targetC"] = comp.TargetTemperature };
+        }
+
+        static object Power(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            return map.powerNetManager.AllNetsListForReading.Where(n => n.powerComps.Count > 0 || n.batteryComps.Count > 0).Select(n => (object)new Dictionary<string, object>
+            {
+                ["gainWatts"] = Math.Round(n.CurrentEnergyGainRate() / CompPower.WattsToWattDaysPerTick),
+                ["storedWd"] = Math.Round(n.CurrentStoredEnergy()),
+                ["batteries"] = n.batteryComps.Count,
+                ["producers"] = n.powerComps.Where(c => c.PowerOutput > 0).Select(c => (object)$"{c.parent.LabelCap} {Math.Round(c.PowerOutput)}W").ToList(),
+                ["consumers"] = n.powerComps.Where(c => c.PowerOutput < 0).GroupBy(c => c.parent.def.label).Select(g => (object)$"{g.Count()}x {g.Key} {Math.Round(g.Sum(c => -c.PowerOutput))}W{(g.Any(c => !c.PowerOn) ? " (some off)" : "")}").ToList(),
+            }).ToList();
+        }
+
+        // ------------------------------------------------------------------ prisoners
+
+        static object Prisoners(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var all = map.mapPawns.PrisonersOfColonySpawned.ToList();
+            var name = Str(a, "name", false);
+            var mode = Str(a, "mode", false);
+            if (name != null && mode != null)
+            {
+                var p = all.FirstOrDefault(x => x.LabelShort.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new ToolError("no prisoner " + name + ". Prisoners: " + string.Join(", ", all.Select(x => x.LabelShort)));
+                var def = DefDatabase<PrisonerInteractionModeDef>.AllDefs.FirstOrDefault(d =>
+                              d.defName.Equals(mode, StringComparison.OrdinalIgnoreCase) || (d.label ?? "").Equals(mode, StringComparison.OrdinalIgnoreCase))
+                          ?? throw new ToolError("modes: " + string.Join(", ", DefDatabase<PrisonerInteractionModeDef>.AllDefs.Select(d => d.defName)));
+                if (def == PrisonerInteractionModeDefOf.Execution) throw new ToolError("execution is not done through this tool");
+                if (!def.allowOnWildMan && p.IsWildMan()) throw new ToolError(def.label + " is not allowed on wild people");
+                p.guest.SetExclusiveInteraction(def);
+            }
+            return all.Select(p => (object)new Dictionary<string, object>
+            {
+                ["name"] = p.LabelShort, ["faction"] = p.Faction?.Name, ["pos"] = Pos(p.Position),
+                ["mode"] = p.guest.ExclusiveInteractionMode?.defName,
+                ["resistance"] = Math.Round(p.guest.resistance, 1), ["will"] = Math.Round(p.guest.will, 1),
+                ["recruitable"] = p.guest.Recruitable,
+                ["healthPct"] = Pct(p.health.summaryHealth.SummaryHealthPercent),
+                ["traits"] = p.story?.traits?.allTraits.Select(t => (object)t.LabelCap).ToList(),
+                ["skills"] = p.skills?.skills.Where(sk => !sk.TotallyDisabled && sk.Level >= 5).Select(sk => (object)$"{sk.def.label} {sk.Level}").ToList(),
+            }).ToList();
+        }
+
+        // ------------------------------------------------------------------ beds
+
+        // type: colonist | prisoner | slave (applies to every bed in the room, like the bed gizmo),
+        // medical: true/false, owner: colonist name (or "none").
+        static object Bed(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var beds = map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().ToList();
+            Building_Bed bed;
+            var id = Str(a, "id", false);
+            if (id != null) bed = beds.FirstOrDefault(b => b.ThingID == id);
+            else { var c = Cell(a, map); bed = beds.FirstOrDefault(b => b.OccupiedRect().Contains(c)); }
+            if (bed == null)
+                throw new ToolError("no finished bed there. Beds: " + string.Join(", ", beds.Select(b => $"{b.ThingID} at ({b.Position.x},{b.Position.z}) {b.ForOwnerType}")));
+            var type = Str(a, "type", false);
+            if (type != null)
+            {
+                if (!Enum.TryParse<BedOwnerType>(type, true, out var ot)) throw new ToolError("type: colonist, prisoner, slave");
+                var room = bed.GetRoom();
+                var affected = room != null && !room.PsychologicallyOutdoors ? room.ContainedBeds.ToList() : new List<Building_Bed> { bed };
+                foreach (var b in affected) b.ForOwnerType = ot;
+            }
+            if (a.ContainsKey("medical")) bed.Medical = Bool(a, "medical", false);
+            var owner = Str(a, "owner", false);
+            var comp = bed.CompAssignableToPawn;
+            if (owner != null && comp != null)
+            {
+                if (owner == "none") foreach (var p in comp.AssignedPawnsForReading.ToList()) comp.TryUnassignPawn(p);
+                else
+                {
+                    var p = FindColonist(owner);
+                    var rep = comp.CanAssignTo(p);
+                    if (!rep.Accepted) throw new ToolError($"cannot assign {p.LabelShort}: {Clean(rep.Reason)}");
+                    comp.TryAssignPawn(p);
+                }
+            }
+            return new Dictionary<string, object>
+            {
+                ["bed"] = bed.ThingID, ["pos"] = Pos(bed.Position), ["type"] = bed.ForOwnerType.ToString(), ["medical"] = bed.Medical,
+                ["owners"] = comp?.AssignedPawnsForReading.Select(p => (object)p.LabelShort).ToList(),
+                ["room"] = bed.GetRoom()?.Role?.label,
+            };
+        }
+
         // ------------------------------------------------------------------ time and saving
 
         public static int pauseAtTick = -1;
@@ -1086,7 +1248,7 @@ namespace RimMcp
                     if (l.ID <= lastLetterId) continue;
                     lastLetterId = l.ID;
                     if (l.def == LetterDefOf.ThreatBig || l.def == LetterDefOf.ThreatSmall || l.def == LetterDefOf.Death ||
-                        l.def == LetterDefOf.NegativeEvent || l is ChoiceLetter)
+                        l.def == LetterDefOf.NegativeEvent || (l is ChoiceLetter && !(l is StandardLetter) && !(l is NewQuestLetter)))
                     { reason = "letter: " + Clean(l.Label); break; }
                 }
                 if (reason == null && Find.WindowStack.WindowsForcePause) reason = "dialog opened";
