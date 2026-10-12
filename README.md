@@ -61,12 +61,17 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
 - **Fighters** (player-controlled, violent, healthy) are drafted and sent to policy `stations`
   or, without stations, to automatic positions near home facing the enemy with the best vanilla
   cover (`CoverUtility`), one cell apart. Melee fighters hold behind the shooters and engage
-  enemies that get within `engageMeleeRadius` of one. Positions are re-planned when the enemy
-  moves a lot or a station is flanked, keeping good stations (hysteresis).
+  enemies that get within `engageMeleeRadius` of one. Positions face the enemy nearest to home,
+  need a line of fire and are never inside closed rooms. They are re-planned when the enemy
+  moves a lot, a station is flanked or burning, or shooters sit out of range for a while (then
+  closer cells win), keeping good stations (hysteresis). Once an enemy is within 12 cells of
+  the line nobody is moved any more (moving pawns do not shoot), and a shooter with an enemy
+  next to him is ordered to fire at it instead of swinging the gun butt.
 - **Retreat** below `retreatHealthPct` or above `retreatBleedRate`: undraft, go to bed.
   **Shelter**: non-combatants outdoors go to a roofed room. **Rescue** downed colonists when no
-  enemy is within 10 cells. **Overwhelming** enemy (`defendIndoorsIfRatioAbove`): indoor
-  positions and a `decision_needed` event.
+  enemy is within 10 cells. **Overwhelming** enemy (`defendIndoorsIfRatioAbove`; both sides
+  rated the same way: people by weapon, animals and mechs by kind): fall back next to the main
+  building and emit a `decision_needed` event.
 - **End** after `undraftAfterQuietTicks` without a threat: undraft the pawns it drafted,
   re-equip dropped weapons, unforbid loot near base, capture downed enemies (free prisoner bed).
 - A colonist Claude drafts or orders (draft, drafted_move, orders, gizmos) or the player
@@ -91,8 +96,10 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
   colonist_downed, colonist_died, mental_break, letter_received, quest_offer, alert_new,
   alert_cleared, fire_in_home, fire_out, governor_error. Read them with
   `governor {action: "events", since: <next>}`.
-- Test harness: `mods/RimMcpGovTest` (quicktest scenarios: raid, manhunters, retreat + rescue,
-  capture, manual-draft respect).
+- Test harness: `mods/RimMcpGovTest` (`rw launch --ticks 25000`): baseline raid with the
+  governor off, the same raid with it, manhunters, retreat + rescue, capture, manual-draft
+  respect, a 7-raider raid, an attack from two sides. Logs per-colonist shots/damage/kills,
+  a trace every 240 ticks, and FAILs when the harness has to kill an enemy.
 
 ## Use
 

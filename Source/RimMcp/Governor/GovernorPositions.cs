@@ -78,14 +78,16 @@ namespace RimMcp
         }
 
         // float.MinValue = not usable. Cover is vanilla's block chance against a shot from the
-        // enemy centroid; then home area, distance to home and "about 8 cells in front of home".
-        static float Score(Map map, IntVec3 home, IntVec3 enemy, Vector3 dir, IntVec3 c, bool indoorOnly, float range, out float cover)
+        // enemy front; then line of fire, home area, distance to home and "about 8 cells in front
+        // of home" (fallback: about 2 cells, hugging the main building). Never inside closed rooms:
+        // walls give the best "cover" and no line of fire. rangePull: how hard to pull the cell
+        // into weapon range of the enemy front (light by default, strong when outranged).
+        static float Score(Map map, IntVec3 home, IntVec3 enemy, Vector3 dir, IntVec3 c, bool fallback, float range, float rangePull, out float cover)
         {
             cover = 0f;
-            if (!UsableCell(c, map)) return float.MinValue;
+            if (!UsableCell(c, map) || Indoor(c, map)) return float.MinValue;
             float along = (c.x - home.x) * dir.x + (c.z - home.z) * dir.z;
-            bool indoor = Indoor(c, map);
-            if (indoorOnly ? !indoor : along < -2f || indoor) return float.MinValue; // outside a fallback, never behind closed walls
+            if (along < (fallback ? -4f : -2f)) return float.MinValue;
             float distEnemy = (c - enemy).LengthHorizontal;
             if (distEnemy < 6f) return float.MinValue;
             cover = CoverUtility.CalculateOverallBlockChance(c, enemy, map);
@@ -94,17 +96,32 @@ namespace RimMcp
             var homeArea = map.areaManager.Home;
             if (homeArea != null && homeArea[c]) score += 8f;
             else if (distHome > 15f) score -= 10f;
-            score -= indoorOnly ? distHome * 0.5f - Mathf.Max(0f, along) : Mathf.Abs(along - 8f);
-            score -= Mathf.Max(0f, distEnemy - range) * 0.1f; // they come closer anyway: a light pull into range
+            if (fallback)
+            {
+                score -= Mathf.Abs(along - 2f) * 1.5f;
+                if (HugsBuilding(c, map)) score += 15f;
+            }
+            else score -= Mathf.Abs(along - 8f);
+            score -= Mathf.Max(0f, distEnemy - range) * rangePull;
             if (!HasLineOfFire(c, enemy, map)) score -= 60f;  // a wall that blocks the shot is no firing position
             return score;
         }
 
+        static bool HugsBuilding(IntVec3 c, Map map)
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                var n = c + GenAdj.AdjacentCells[i];
+                if (n.InBounds(map) && (n.GetDoor(map) != null || Indoor(n, map))) return true;
+            }
+            return false;
+        }
+
         static readonly List<IntVec3> leanTmp = new List<IntVec3>();
 
-        // Straight line of sight to the enemy centroid, or from one of the cells a shooter leans
-        // out to (vanilla ShootLeanUtility), like a pawn shooting around a corner.
-        static bool HasLineOfFire(IntVec3 c, IntVec3 enemy, Map map)
+        // Straight line of sight to the enemy, or from one of the cells a shooter leans out to
+        // (vanilla ShootLeanUtility), like a pawn shooting around a corner.
+        public static bool HasLineOfFire(IntVec3 c, IntVec3 enemy, Map map)
         {
             if (!enemy.InBounds(map) || GenSight.LineOfSight(c, enemy, map, skipFirstCell: true)) return true;
             leanTmp.Clear();
@@ -114,19 +131,19 @@ namespace RimMcp
             return false;
         }
 
-        public static float ScoreOf(Map map, IntVec3 home, IntVec3 enemy, IntVec3 c, bool indoorOnly, float range) =>
-            Score(map, home, enemy, Dir(home, enemy), c, indoorOnly, range, out _);
+        public static float ScoreOf(Map map, IntVec3 home, IntVec3 enemy, IntVec3 c, bool fallback, float range, float rangePull) =>
+            Score(map, home, enemy, Dir(home, enemy), c, fallback, range, rangePull, out _);
 
-        // Firing positions around home facing the enemy centroid, best first. indoorOnly = the
-        // fallback when the enemy is overwhelming (roofed rooms near home, still facing them).
-        public static List<Cand> FiringCells(Map map, IntVec3 home, IntVec3 enemy, bool indoorOnly, float range)
+        // Firing positions around home facing the enemy front, best first. fallback = the
+        // positions when the enemy is overwhelming (close to the main building).
+        public static List<Cand> FiringCells(Map map, IntVec3 home, IntVec3 enemy, bool fallback, float range, float rangePull)
         {
             var res = new List<Cand>();
             var dir = Dir(home, enemy);
             foreach (var c in GenRadial.RadialCellsAround(home, AutoRadius, true))
             {
                 if (!c.InBounds(map)) continue;
-                float score = Score(map, home, enemy, dir, c, indoorOnly, range, out var cover);
+                float score = Score(map, home, enemy, dir, c, fallback, range, rangePull, out var cover);
                 if (score > float.MinValue) res.Add(new Cand { cell = c, score = score, cover = cover });
             }
             res.Sort((a, b) => b.score.CompareTo(a.score));
