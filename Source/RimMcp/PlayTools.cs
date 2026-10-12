@@ -47,6 +47,7 @@ namespace RimMcp
                 ["thermostat"] = Thermostat,
                 ["switch"] = Switch,
                 ["gizmos"] = Gizmos,
+                ["governor"] = GovernorTool,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }
@@ -1047,6 +1048,7 @@ namespace RimMcp
                 var rep = FloatMenuOptionProvider_DraftedMove.PawnCanGoto(p, dest);
                 if (!rep.Accepted) { res.Add(p.LabelShort + ": " + Clean(rep.Reason)); continue; }
                 used.Add(dest);
+                Governor.NotePlayerOrder(p);
                 FloatMenuOptionProvider_DraftedMove.PawnGotoAction(dest, p, dest);
                 res.Add($"{p.LabelShort}: moving to ({dest.x},{dest.z})");
             }
@@ -1073,6 +1075,7 @@ namespace RimMcp
                 : opts.FirstOrDefault(o => Clean(o.Label).IndexOf(choose, StringComparison.OrdinalIgnoreCase) >= 0);
             if (pick == null) throw new ToolError($"no option '{choose}'. Options: " + string.Join(" | ", opts.Select((o, i) => i + ": " + Clean(o.Label))));
             if (pick.Disabled) throw new ToolError("option disabled: " + Clean(pick.Label));
+            Governor.NotePlayerOrder(p);
             pick.Chosen(true, null);
             return $"{p.LabelShort}: {Clean(pick.Label)}";
         }

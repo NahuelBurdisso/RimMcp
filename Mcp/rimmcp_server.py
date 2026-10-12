@@ -249,6 +249,21 @@ TOOLS.append(
                          "target_x": {"type": "integer"}, "target_z": {"type": "integer"},
                          "target_name": {"type": "string"}, "dest_x": {"type": "integer"},
                          "dest_z": {"type": "integer"}, "option": {"type": "string"}})})
+TOOLS.append(
+    {"name": "governor", "read": False,
+     "description": "In-game reflexes that react every tick while Claude thinks: on a threat to a home map it drafts "
+                    "fighters to covered positions (or policy stations), retreats the wounded, shelters non-combatants, "
+                    "rescues downed colonists, captures downed enemies (free prisoner bed needed), then undrafts and "
+                    "unforbids loot. Never touches a colonist Claude drafted or ordered during the fight. Policy: "
+                    "governor.json (path in the output, hot-reloaded). action: status (default; policy, per-map threat, "
+                    "assignments, last events) | enable | disable | reload | set_stations (cells [[x,z],...], map id or "
+                    "'home'; empty = automatic) | events (since = cursor from the last call, or tick; returns events + next).",
+     "inputSchema": obj({"action": {"type": "string", "enum": ["status", "enable", "disable", "reload", "set_stations", "events"]},
+                         "map": {"type": "string", "description": "set_stations: map id, 'home' or omitted (current map)"},
+                         "cells": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+                         "since": {"type": "integer", "description": "events: cursor (seq) returned as next"},
+                         "tick": {"type": "integer", "description": "events: from this game tick on"},
+                         "limit": {"type": "integer"}})})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 

@@ -43,6 +43,7 @@ namespace RimMcp
                     res["note"] = "activate with index (or label); targeted ones also need target_x,target_z or target_name";
                     return res;
                 }
+                if (t is Pawn gp) Governor.NotePlayerOrder(gp);
                 Gizmo pick;
                 if (a.ContainsKey("index"))
                 {

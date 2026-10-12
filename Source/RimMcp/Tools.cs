@@ -312,6 +312,7 @@ namespace RimMcp
             foreach (var p in pawns)
             {
                 if (p.drafter == null) { result.Add(p.LabelShort + ": cannot be drafted"); continue; }
+                Governor.NotePlayerOrder(p);
                 p.drafter.Drafted = drafted;
                 result.Add($"{p.LabelShort}: {(p.Drafted ? "drafted" : "undrafted")}");
             }

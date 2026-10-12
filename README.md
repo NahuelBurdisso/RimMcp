@@ -43,10 +43,56 @@ Claude Code --stdio--> Mcp/rimmcp_server.py --HTTP 127.0.0.1--> RimMcp mod (in g
 | `dialogs` / `choose` | open dialogs, letters and quest offers; answer them (ritual and bestowing-ceremony start windows: roles, quality, begin/cancel) |
 | `gizmos` | a thing's command buttons as the player sees them (no dev gizmos); click one, with a map target if it needs one |
 | `trade` | the open trade screen: list, set counts, execute, cancel |
+| `governor` | in-game combat reflexes + event stream (see below): status, enable, disable, reload, set_stations, events |
 
 Every action uses the game's own checks (designators, `GenConstruct`, research gates) and
 returns an error saying why instead of failing silently. The MCP server also works as a CLI:
 `python Mcp/rimmcp_server.py call <tool> '{"arg": 1}'`.
+
+## Governor (in-game reflexes)
+
+Claude acts with 10-20 s between tool calls; mad animals and raids do not wait. The governor
+(`Source/RimMcp/Governor/`, a `GameComponent`) runs inside the game, only when the policy
+enables it, and does only what a player could: draft, move, ordered jobs, forbid flags.
+
+- **Threat** = visible hostile pawns that are an active threat to a home map (raiders,
+  manhunters, mechanoids; not dormant, not your own berserkers or prisoners, not factions in
+  `ignoreFactions`). Checked every 60 ticks; the heavy logic runs every 120 ticks while needed.
+- **Fighters** (player-controlled, violent, healthy) are drafted and sent to policy `stations`
+  or, without stations, to automatic positions near home facing the enemy with the best vanilla
+  cover (`CoverUtility`), one cell apart. Melee fighters hold behind the shooters and engage
+  enemies that get within `engageMeleeRadius` of one. Positions are re-planned when the enemy
+  moves a lot or a station is flanked, keeping good stations (hysteresis).
+- **Retreat** below `retreatHealthPct` or above `retreatBleedRate`: undraft, go to bed.
+  **Shelter**: non-combatants outdoors go to a roofed room. **Rescue** downed colonists when no
+  enemy is within 10 cells. **Overwhelming** enemy (`defendIndoorsIfRatioAbove`): indoor
+  positions and a `decision_needed` event.
+- **End** after `undraftAfterQuietTicks` without a threat: undraft the pawns it drafted,
+  re-equip dropped weapons, unforbid loot near base, capture downed enemies (free prisoner bed).
+- A colonist Claude drafts or orders (draft, drafted_move, orders, gizmos) or the player
+  undrafts during a fight is never touched again until the fight ends.
+- Policy `<save data folder>/RimMcp/governor.json` (created with defaults, disabled; re-read
+  when it changes):
+
+```json
+{"enabled": false,
+ "combat": {"autoDraft": true, "retreatHealthPct": 0.5, "retreatBleedRate": 0.5,
+            "stations": {"home": [[120, 98], [122, 98]]}, "homeCenter": null,
+            "engageMeleeRadius": 5, "undraftAfterQuietTicks": 600,
+            "defendIndoorsIfRatioAbove": 2.5, "ignoreFactions": []},
+ "rescue": {"downedColonists": true, "captureDowned": true},
+ "nonCombatants": {"shelter": true},
+ "events": {"maxFileKb": 512}}
+```
+
+- Events `<save data folder>/RimMcp/events.jsonl` (rotated to `events.1.jsonl`), one JSON
+  object per line with `seq`, tick, date, hour, map, `type`: governor_active, threat_start,
+  governor_deploy, retreat, rescued, captured, player_override, decision_needed, threat_end,
+  colonist_downed, colonist_died, mental_break, letter_received, quest_offer, alert_new,
+  alert_cleared, fire_in_home, fire_out, governor_error. Read them with
+  `governor {action: "events", since: <next>}`.
+- Test harness: `mods/RimMcpGovTest` (quicktest scenarios: raid, manhunters, retreat + rescue,
+  capture, manual-draft respect).
 
 ## Use
 
