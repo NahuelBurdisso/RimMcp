@@ -46,6 +46,7 @@ namespace RimMcp
                 ["power"] = Power,
                 ["thermostat"] = Thermostat,
                 ["switch"] = Switch,
+                ["gizmos"] = Gizmos,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }

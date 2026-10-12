@@ -40,7 +40,8 @@ Claude Code --stdio--> Mcp/rimmcp_server.py --HTTP 127.0.0.1--> RimMcp mod (in g
 | `drafted_move`, `orders` | move drafted colonists; any right-click order of a colonist at a cell |
 | `run` | unpause for N in-game hours, auto-pause on threats, deaths, choice letters and dialogs |
 | `save` | save the game |
-| `dialogs` / `choose` | open dialogs, letters and quest offers; answer them |
+| `dialogs` / `choose` | open dialogs, letters and quest offers; answer them (ritual and bestowing-ceremony start windows: roles, quality, begin/cancel) |
+| `gizmos` | a thing's command buttons as the player sees them (no dev gizmos); click one, with a map target if it needs one |
 | `trade` | the open trade screen: list, set counts, execute, cancel |
 
 Every action uses the game's own checks (designators, `GenConstruct`, research gates) and

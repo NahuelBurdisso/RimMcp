@@ -180,7 +180,7 @@ TOOLS += [
      "inputSchema": obj({})},
     {"name": "choose", "read": False,
      "description": "Answer a decision from dialogs: window + option (index or text; message boxes A/B/C; 'close'), "
-                    "name dialogs: option 'name' + name (+ second); letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
+                    "name dialogs: option 'name' + name (+ second); ritual/ceremony start windows: option 'begin' or 'cancel'; letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
      "inputSchema": obj({"window": {"type": "integer"}, "letter": {"type": "integer"}, "quest": {"type": "integer"},
                          "option": {"type": "string"}, "reward": {"type": "integer"}, "accepter": {"type": "string"},
                          "name": {"type": "string"}, "second": {"type": "string"}})},
@@ -235,6 +235,20 @@ TOOLS.append(
      "description": "Turn a switchable building (cooler, heater, lamp, turret, power switch...) at x,z on or off; "
                     "a colonist walks over and flicks it, as with the in-game toggle.",
      "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}, "on": {"type": "boolean", "default": True}}, ["x", "z"])})
+TOOLS.append(
+    {"name": "gizmos", "read": False,
+     "description": "The command buttons of one thing as the player sees them when it is selected (selects it; no dev "
+                    "gizmos): target = name (colonist or any visible pawn, short name or id) or id or x,z. Without index: "
+                    "list with label, desc, disabled + reason, toggle state, target kind. index (or label): click it; "
+                    "disabled ones refuse. Targeted commands (attack, abilities, psycasts) need target_x,target_z or "
+                    "target_name (+ dest_x,dest_z for skip-like abilities); world-map targets are not supported. A "
+                    "command that opens a menu: pass option (index/text). A window it opens (e.g. ritual or bestowing "
+                    "ceremony start) is reported: answer it with dialogs/choose.",
+     "inputSchema": obj({"name": {"type": "string"}, "id": {"type": "string"}, "x": {"type": "integer"},
+                         "z": {"type": "integer"}, "index": {"type": "integer"}, "label": {"type": "string"},
+                         "target_x": {"type": "integer"}, "target_z": {"type": "integer"},
+                         "target_name": {"type": "string"}, "dest_x": {"type": "integer"},
+                         "dest_z": {"type": "integer"}, "option": {"type": "string"}})})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 

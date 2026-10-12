@@ -25,7 +25,7 @@ namespace RimMcp
 
         static List<Window> DecisionWindows() =>
             Find.WindowStack.Windows.Where(w => !(w is ImmediateWindow) &&
-                (w is Dialog_NodeTree || w is Dialog_MessageBox || w is Dialog_Trade || w.forcePause)).ToList();
+                (w is Dialog_NodeTree || w is Dialog_MessageBox || w is Dialog_Trade || w is Dialog_BeginLordJob || w.forcePause)).ToList();
 
         static List<object> DescribeOptions(IEnumerable<DiaOption> opts) =>
             opts.Select((o, i) =>
@@ -85,6 +85,7 @@ namespace RimMcp
                     if (mb.buttonCText != null) b["C"] = Clean(mb.buttonCText);
                     d["buttons"] = b;
                 }
+                else if (w is Dialog_BeginLordJob lj) DescribeLordJob(lj, d);
                 else if (w is Dialog_Trade) d["note"] = "trade screen open: use the trade tool";
                 else if (w is Dialog_GiveName gn)
                 {
@@ -202,6 +203,7 @@ namespace RimMcp
                     else { if (mb.buttonCText == null) throw new ToolError("no button C"); mb.buttonCAction?.Invoke(); if (mb.buttonCClose) mb.Close(); }
                     return "pressed " + key;
                 }
+                if (w is Dialog_BeginLordJob lj) return ChooseLordJob(lj, opt);
                 throw new ToolError(w.GetType().Name + " has no automatic answer; option 'close' closes it");
             }
             if (a.ContainsKey("letter"))
