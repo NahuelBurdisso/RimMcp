@@ -1223,6 +1223,12 @@ namespace RimMcp
                 var room = bed.GetRoom();
                 var affected = room != null && !room.PsychologicallyOutdoors ? room.ContainedBeds.ToList() : new List<Building_Bed> { bed };
                 foreach (var b in affected) b.ForOwnerType = ot;
+                // as the bed gizmo does: only a room-shape refresh recomputes "prison cell"
+                if (room != null && !room.TouchesMapEdge)
+                {
+                    bed.GetDistrict()?.Notify_RoomShapeOrContainedBedsChanged();
+                    room.Notify_RoomShapeChanged();
+                }
             }
             if (a.ContainsKey("medical")) bed.Medical = Bool(a, "medical", false);
             var owner = Str(a, "owner", false);

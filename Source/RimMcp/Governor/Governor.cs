@@ -29,6 +29,9 @@ namespace RimMcp
     {
         public Map map;
         public int createdTick;
+        public bool fresh = true;          // no threat handled yet since the game was loaded
+        public int postUntil = -1;         // keep rescuing/capturing after the end until then
+        public readonly List<Pawn> postEnemies = new List<Pawn>();
         public bool active;
         public int startTick, lastThreatTick = -1, firstDeployTick = -1, lastPlanTick = -100000;
         public IntVec3 home = IntVec3.Invalid, enemyCentroid = IntVec3.Invalid, planCentroid = IntVec3.Invalid;
@@ -58,6 +61,7 @@ namespace RimMcp
 
         public void ResetThreat()
         {
+            postEnemies.Clear(); postUntil = -1;
             threats.Clear(); seen.Clear(); assign.Clear(); sheltered.Clear(); retreated.Clear();
             lastOrderTick.Clear(); lastJobId.Clear(); ourJobs.Clear(); weapons.Clear(); badCells.Clear();
             startDowned.Clear(); ourDowned.Clear(); startColonists.Clear(); warnedNoBed.Clear();
@@ -81,7 +85,8 @@ namespace RimMcp
         public readonly HashSet<Pawn> Manual = new HashSet<Pawn>();    // the player took them: hands off until the threat ends
         readonly Dictionary<int, GovMapState> states = new Dictionary<int, GovMapState>();
         readonly GovernorWatch watch = new GovernorWatch();
-        bool wasEnabled, policyPolled, errorLogged, ioWarned;
+        bool wasEnabled, policyPolled, ioWarned;
+        readonly HashSet<string> loggedErrors = new HashSet<string>();
         public int Errors;
 
         List<Pawn> tmpSave1, tmpSave2;
@@ -141,9 +146,9 @@ namespace RimMcp
             catch (Exception e)
             {
                 Errors++;
-                if (errorLogged) return;
-                errorLogged = true;
-                Log.Error("[RimMcp] governor tick failed (logged once, the governor keeps running): " + e);
+                var key = e.GetType().Name + e.Message + e.TargetSite;
+                if (loggedErrors.Count >= 10 || !loggedErrors.Add(key)) return; // each distinct error once, never spam
+                Log.Error("[RimMcp] governor tick failed (each distinct error is logged once; the governor keeps running): " + e);
                 try { GovernorEvents.Emit("governor_error", null, new Dictionary<string, object> { ["error"] = e.GetType().Name + ": " + e.Message }); }
                 catch { }
             }
@@ -252,11 +257,16 @@ namespace RimMcp
         void StartThreat(GovMapState st, GovernorPolicy pol)
         {
             var map = st.map;
+            var found = st.threats.ToList();
             st.ResetThreat();
-            foreach (var p in st.threats) st.seen.Add(p);
+            st.threats.AddRange(found);
+            foreach (var p in found) st.seen.Add(p);
+            // rescue/capture jobs still running from the last fight stay ours
+            foreach (var task in st.rescues.Values.Concat(st.captures.Values)) st.ourJobs.Add(task.jobId);
             st.active = true;
             st.startTick = Find.TickManager.TicksGame;
-            Manual.RemoveWhere(p => p == null || p.Map == map); // a new threat: whoever the player drafted gets re-detected
+            if (!st.fresh) Manual.RemoveWhere(p => p == null || p.Map == map); // a new threat: whoever the player drafted gets re-detected
+            st.fresh = false;
             st.home = GovernorPositions.HomeCenter(map, pol);
             tmpPawns.Clear();
             tmpPawns.AddRange(map.mapPawns.FreeColonistsSpawned);
@@ -308,8 +318,10 @@ namespace RimMcp
             int t = Find.TickManager.TicksGame;
             bool leftovers = false;
             foreach (var p in Drafted) if (p.Map == map) { leftovers = true; break; }
-            if (!st.active && st.rescues.Count == 0 && st.captures.Count == 0 && !leftovers) return;
+            bool post = !st.active && t < st.postUntil;
+            if (!st.active && st.rescues.Count == 0 && st.captures.Count == 0 && !leftovers && !post) return;
 
+            st.threats.RemoveAll(p => p.Dead || !p.Spawned || p.Downed || p.Map != map);
             DetectOverrides(st);
             if (st.active)
             {
@@ -318,9 +330,14 @@ namespace RimMcp
                 {
                     var quiet = t - st.lastThreatTick;
                     if (pol.rescueDowned) RescueDowned(st, pol, false);
-                    if (pol.captureDowned) CaptureDowned(st);
+                    if (pol.captureDowned) CaptureDowned(st, st.seen);
                     if (quiet >= pol.undraftAfterQuietTicks) EndThreat(st, pol);
                 }
+            }
+            else if (post)
+            {
+                if (pol.rescueDowned) RescueDowned(st, pol, false);
+                if (pol.captureDowned) CaptureDowned(st, st.postEnemies);
             }
             else if (leftovers && t - Math.Max(st.createdTick, st.lastThreatTick) >= pol.undraftAfterQuietTicks)
                 ReleaseAll(st);
@@ -397,7 +414,9 @@ namespace RimMcp
         bool BusyWithOurTask(GovMapState st, Pawn p)
         {
             var job = p.CurJob;
-            if (job == null || !st.ourJobs.Contains(job.loadID)) return false;
+            if (job == null) return false;
+            if (!st.ourJobs.Contains(job.loadID) && !st.rescues.Values.Any(x => x.jobId == job.loadID) && !st.captures.Values.Any(x => x.jobId == job.loadID))
+                return false;
             return job.def == JobDefOf.Rescue || job.def == JobDefOf.Capture || job.def == JobDefOf.Equip;
         }
 
@@ -813,7 +832,8 @@ namespace RimMcp
             tmpPawns.AddRange(st.map.mapPawns.FreeColonistsSpawned);
             foreach (var r in tmpPawns)
             {
-                if (r == patient || !CanOrder(r) || Manual.Contains(r) || st.retreated.Contains(r)) continue;
+                if (r == patient || !CanOrder(r) || Manual.Contains(r)) continue;
+                if (st.retreated.Contains(r) && (st.threats.Count > 0 || NeedsRetreat(r, GovernorPolicy.Current))) continue;
                 if (!r.health.capacities.CapableOf(PawnCapacityDefOf.Manipulation)) continue;
                 if (BusyWithOurTask(st, r) || r.carryTracker?.CarriedThing != null) continue;
                 float cost = (r.Position - patient.Position).LengthHorizontal;
@@ -864,9 +884,9 @@ namespace RimMcp
             }
         }
 
-        void CaptureDowned(GovMapState st)
+        void CaptureDowned(GovMapState st, IEnumerable<Pawn> enemies)
         {
-            foreach (var e in st.seen)
+            foreach (var e in enemies)
             {
                 if (e.Dead || !e.Spawned || !e.Downed || e.Map != st.map || e.IsPrisonerOfColony || e.Fogged()) continue;
                 if (e.Faction == Faction.OfPlayer || !e.CanBeCaptured()) continue;
@@ -963,6 +983,7 @@ namespace RimMcp
                 ["rescuing"] = st.rescues.Count,
             });
             Manual.RemoveWhere(p => p == null || !p.Spawned || p.Map == map);
+            var downedEnemies = st.seen.Where(e => !e.Dead && e.Spawned && e.Downed && e.Map == map && !e.IsPrisonerOfColony).ToList();
             var rescues = st.rescues.ToList();
             var captures = st.captures.ToList();
             var jobs = st.ourJobs.ToList();
@@ -972,6 +993,9 @@ namespace RimMcp
             foreach (var j in jobs) st.ourJobs.Add(j); // rescue/capture jobs still running are ours
             st.active = false;
             st.lastThreatTick = t;
+            st.postEnemies.Clear();
+            st.postEnemies.AddRange(downedEnemies);
+            st.postUntil = t + 2500;
         }
 
         // Undraft every pawn the governor drafted on this map, except ones carrying out a rescue or capture.

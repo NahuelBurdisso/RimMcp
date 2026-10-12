@@ -84,7 +84,8 @@ namespace RimMcp
             cover = 0f;
             if (!UsableCell(c, map)) return float.MinValue;
             float along = (c.x - home.x) * dir.x + (c.z - home.z) * dir.z;
-            if (indoorOnly ? !Indoor(c, map) : along < -2f) return float.MinValue;
+            bool indoor = Indoor(c, map);
+            if (indoorOnly ? !indoor : along < -2f || indoor) return float.MinValue; // outside a fallback, never behind closed walls
             float distEnemy = (c - enemy).LengthHorizontal;
             if (distEnemy < 6f) return float.MinValue;
             cover = CoverUtility.CalculateOverallBlockChance(c, enemy, map);
@@ -95,7 +96,22 @@ namespace RimMcp
             else if (distHome > 15f) score -= 10f;
             score -= indoorOnly ? distHome * 0.5f - Mathf.Max(0f, along) : Mathf.Abs(along - 8f);
             score -= Mathf.Max(0f, distEnemy - range) * 0.1f; // they come closer anyway: a light pull into range
+            if (!HasLineOfFire(c, enemy, map)) score -= 60f;  // a wall that blocks the shot is no firing position
             return score;
+        }
+
+        static readonly List<IntVec3> leanTmp = new List<IntVec3>();
+
+        // Straight line of sight to the enemy centroid, or from one of the cells a shooter leans
+        // out to (vanilla ShootLeanUtility), like a pawn shooting around a corner.
+        static bool HasLineOfFire(IntVec3 c, IntVec3 enemy, Map map)
+        {
+            if (!enemy.InBounds(map) || GenSight.LineOfSight(c, enemy, map, skipFirstCell: true)) return true;
+            leanTmp.Clear();
+            ShootLeanUtility.LeanShootingSourcesFromTo(c, enemy, map, leanTmp);
+            foreach (var s in leanTmp)
+                if (s != c && GenSight.LineOfSight(s, enemy, map, skipFirstCell: true)) return true;
+            return false;
         }
 
         public static float ScoreOf(Map map, IntVec3 home, IntVec3 enemy, IntVec3 c, bool indoorOnly, float range) =>
