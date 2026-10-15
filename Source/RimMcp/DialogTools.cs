@@ -86,7 +86,7 @@ namespace RimMcp
                     d["buttons"] = b;
                 }
                 else if (w is Dialog_BeginLordJob lj) DescribeLordJob(lj, d);
-                else if (w is Dialog_Trade) d["note"] = "trade screen open: use the trade tool";
+                else if (w is Dialog_Trade || TradeSession.Active && w.GetType().Name.Contains("Trade")) d["note"] = "trade screen open: use the trade tool";
                 else if (w is Dialog_GiveName gn)
                 {
                     d["suggestedName"] = GetField(gn, "curName");
@@ -273,7 +273,9 @@ namespace RimMcp
         {
             RequireGame();
             var action = (Str(a, "action", false) ?? "list").ToLowerInvariant();
-            var dlg = Find.WindowStack.WindowOfType<Dialog_Trade>();
+            // vanilla Dialog_Trade, or a mod's replacement (e.g. Dynamic Trade Interface's Window_DynamicTrade) on the same TradeSession
+            var dlg = (Window)Find.WindowStack.WindowOfType<Dialog_Trade>()
+                      ?? Find.WindowStack.Windows.FirstOrDefault(w => w.GetType().Name.Contains("Trade"));
             if (dlg == null || !TradeSession.Active)
                 throw new ToolError("no trade screen open. Open one with orders (a colonist + 'Trade with' on a trader, or a comms console)");
             var deal = TradeSession.deal;

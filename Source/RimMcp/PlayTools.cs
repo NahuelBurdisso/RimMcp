@@ -592,7 +592,18 @@ namespace RimMcp
                     z.SetPlantDefToGrow(plant);
                     return $"{z.label} now grows {plant.label}";
                 }
-                case "set_filter": return SetFilter(FindZone(map, Str(a, "zone")) as Zone_Stockpile ?? throw new ToolError("not a stockpile"), a);
+                case "set_filter":
+                {
+                    // x,z (+x2,z2): storage buildings (shelves...) in that rect instead of a zone
+                    if (a.ContainsKey("x"))
+                    {
+                        var stores = Rect(a, map).Cells.SelectMany(c => c.GetThingList(map)).OfType<Building_Storage>().Distinct().ToList();
+                        if (stores.Count == 0) throw new ToolError("no storage building (shelf...) in that rectangle");
+                        return stores.Select(b => SetFilter(b.settings, $"{b.LabelCap} ({b.Position.x},{b.Position.z})", a)).ToList();
+                    }
+                    var zone = FindZone(map, Str(a, "zone")) as Zone_Stockpile ?? throw new ToolError("not a stockpile");
+                    return SetFilter(zone.settings, zone.label, a);
+                }
                 case "delete":
                 {
                     var z = FindZone(map, Str(a, "zone"));
@@ -706,7 +717,7 @@ namespace RimMcp
             zone.CheckContiguous();
             var label = Str(a, "label", false);
             if (label != null) zone.label = label;
-            if (a.ContainsKey("allow") || a.ContainsKey("disallow") || a.ContainsKey("priority") || a.ContainsKey("only")) SetFilter(zone, a);
+            if (a.ContainsKey("allow") || a.ContainsKey("disallow") || a.ContainsKey("priority") || a.ContainsKey("only")) SetFilter(zone.settings, zone.label, a);
             zone.slotGroup.RemoveHaulDesignationOnStoredThings();
             var r = new Dictionary<string, object> { ["zone"] = zone.label, ["cells"] = zone.cells.Count, ["priority"] = zone.settings.Priority.ToString() };
             if (reasons.Count > 0) r["skipped"] = ReasonsObj(reasons);
@@ -714,9 +725,9 @@ namespace RimMcp
         }
 
         // only/allow/disallow: ThingCategoryDef or ThingDef defNames (e.g. Foods, Manufactured, ResourcesRaw, Weapons, Apparel, Corpses, Steel, WoodLog)
-        static object SetFilter(Zone_Stockpile zone, Dictionary<string, object> a)
+        static object SetFilter(StorageSettings settings, string label, Dictionary<string, object> a)
         {
-            var filter = zone.settings.filter;
+            var filter = settings.filter;
             void Apply(List<string> names, bool allow)
             {
                 if (names == null) return;
@@ -742,11 +753,11 @@ namespace RimMcp
             {
                 if (!Enum.TryParse<StoragePriority>(pr, true, out var p) || p == StoragePriority.Unstored)
                     throw new ToolError("priority: Low, Normal, Preferred, Important, Critical");
-                zone.settings.Priority = p;
+                settings.Priority = p;
             }
             return new Dictionary<string, object>
             {
-                ["zone"] = zone.label, ["priority"] = zone.settings.Priority.ToString(),
+                ["zone"] = label, ["priority"] = settings.Priority.ToString(),
                 ["allowedCount"] = filter.AllowedDefCount, ["summary"] = Clean(filter.Summary),
             };
         }
@@ -943,8 +954,14 @@ namespace RimMcp
                 area = FindArea(map, label);
                 if (!area.AssignableAsAllowed()) throw new ToolError(area.Label + " cannot be used as an allowed area");
             }
+            // names may also be colony animals (a pet or work animal kept out of the kitchen)
+            var names = StrList(a, "names") ?? (a.ContainsKey("name") ? new List<string> { Str(a, "name") } : null);
+            var pawns = names == null || names.Count == 0 || names.Count == 1 && names[0] == "all"
+                ? AllColonists().ToList()
+                : names.Select(n => map.mapPawns.SpawnedColonyAnimals.FirstOrDefault(an =>
+                      string.Equals(an.LabelShort, n, StringComparison.OrdinalIgnoreCase)) ?? FindColonist(n)).ToList();
             var res = new List<object>();
-            foreach (var p in PawnsArg(a))
+            foreach (var p in pawns)
             {
                 if (p.playerSettings == null) { res.Add(p.LabelShort + ": no settings"); continue; }
                 p.playerSettings.AreaRestrictionInPawnCurrentMap = area;
@@ -1168,6 +1185,9 @@ namespace RimMcp
                 ["producers"] = n.powerComps.Where(c => c.PowerOutput > 0).Select(c => (object)$"{c.parent.LabelCap} {Math.Round(c.PowerOutput)}W").ToList(),
                 ["consumers"] = n.powerComps.Where(c => c.PowerOutput < 0 || !c.PowerOn && c.Props.PowerConsumption > 0).GroupBy(c => c.parent.def.label).Select(g => (object)$"{g.Count()}x {g.Key} {Math.Round(g.Sum(c => -c.PowerOutput))}W").ToList(),
                 ["off"] = n.powerComps.Where(c => !c.PowerOn).Select(c => (object)$"{c.parent.LabelCap} at ({c.parent.Position.x},{c.parent.Position.z}): {OffReason(c)}").ToList(),
+                // a generator out of fuel or broken stays PowerOn but produces 0 W: list it, or an outage looks like a missing producer
+                ["idleProducers"] = n.powerComps.Where(c => c is CompPowerPlant && c.PowerOn && c.PowerOutput <= 0)
+                    .Select(c => (object)$"{c.parent.LabelCap} at ({c.parent.Position.x},{c.parent.Position.z}): {OffReason(c)}").ToList(),
             }).ToList();
         }
 

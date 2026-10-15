@@ -121,7 +121,7 @@ TOOLS += [
     {"name": "zone", "read": False,
      "description": "Zones and allowed areas. action: grow (plant defName, default Plant_Potato) | fishing (rect over water) | stockpile | dumping "
                     "(optional only/allow/disallow lists of ThingCategoryDef or ThingDef, priority) | set_plant (zone, plant) "
-                    "| set_filter (zone, only/allow/disallow, priority) | delete (zone) | remove_cells (rect) | area_new "
+                    "| set_filter (zone, or x,z[,x2,z2] for shelves/storage buildings; only/allow/disallow, priority) | delete (zone) | remove_cells (rect) | area_new "
                     "(label, rect) | area_add / area_remove (area, rect) | area_delete (area). Home area and roofs: designate.",
      "inputSchema": obj({"action": {"type": "string"}, **RECT, "zone": {"type": "string"}, "plant": {"type": "string"},
                          "label": {"type": "string"}, "area": {"type": "string"},
