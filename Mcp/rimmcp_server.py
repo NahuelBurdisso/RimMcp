@@ -91,9 +91,9 @@ TOOLS += [
     {"name": "map_view", "read": True,
      "description": "The current map as a text grid (north up) with a legend, plus a list of buildings, items and "
                     "pawns with coordinates. No x/z = whole map (use step 4 or 5 for an overview). layers: main "
-                    "(things, zones, terrain), roof, fertility. Unexplored cells show as '?'.",
+                    "(things, zones, terrain), roof, fertility, build (what the terrain can carry: heavy for walls). Unexplored cells show as '?'.",
      "inputSchema": obj({**RECT, "step": {"type": "integer", "default": 1},
-                         "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility"]}},
+                         "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility", "build"]}},
                          "objects": {"type": "boolean"}, "maxObjects": {"type": "integer"}})},
     {"name": "things", "read": True,
      "description": "Find things on the map: by query (defName or label part), kind (item, building, plant, pawn, "

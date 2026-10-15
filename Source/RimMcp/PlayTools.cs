@@ -201,6 +201,17 @@ namespace RimMcp
             return 'c';
         }
 
+        // what the terrain can carry, as the player sees when inspecting it (walls/turrets need heavy)
+        static char BuildChar(Map map, IntVec3 c)
+        {
+            if (c.Fogged(map)) return '?';
+            var t = c.GetTerrain(map);
+            if (t.affordances.Contains(TerrainAffordanceDefOf.Heavy)) return 'H';
+            if (t.affordances.Contains(TerrainAffordanceDefOf.Medium)) return 'm';
+            if (t.affordances.Contains(TerrainAffordanceDefOf.Light)) return 'l';
+            return t.passability == Traversability.Impassable ? 'X' : 'x';
+        }
+
         static char FertChar(Map map, IntVec3 c)
         {
             if (c.Fogged(map)) return '?';
@@ -238,7 +249,8 @@ namespace RimMcp
                     case "main": f = CellChar; r["legend"] = MapLegend; break;
                     case "roof": f = RoofChar; r["roofLegend"] = ".=open sky c=constructed roof t=thin rock roof M=overhead mountain (thick, cannot be removed; nothing drops through)"; break;
                     case "fertility": f = FertChar; r["fertilityLegend"] = ".=0 (cannot grow), 5=100%, 7=140% (rich soil)"; break;
-                    default: throw new ToolError("layers: main, roof, fertility");
+                    case "build": f = BuildChar; r["buildLegend"] = "H=heavy (walls, turrets) m=medium l=light only x=nothing (mud, water) X=impassable; terrain only, ignores what stands on it"; break;
+                    default: throw new ToolError("layers: main, roof, fertility, build");
                 }
                 var lines = new List<object>();
                 var axis = new StringBuilder("     ");

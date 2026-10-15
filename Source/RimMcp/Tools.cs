@@ -272,6 +272,8 @@ namespace RimMcp
                     ["map"] = map.Parent?.LabelCap.ToString(),
                     ["hostiles"] = hostiles,
                     ["fires"] = map.listerThings.ThingsOfDef(ThingDefOf.Fire).Count,
+                    // the ones colonists fight on their own (home area), the rest is wildfire far away
+                    ["homeFires"] = map.listerThings.ThingsOfDef(ThingDefOf.Fire).Count(f => map.areaManager.Home[f.Position]),
                     ["conditions"] = map.gameConditionManager.ActiveConditions
                         .Select(c => (object)c.LabelCap.ToString()).ToList(),
                 });
