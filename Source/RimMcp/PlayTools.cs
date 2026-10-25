@@ -845,6 +845,10 @@ namespace RimMcp
             return hit;
         }
 
+        static WorkTypeDef BillWorkType(Building bench, RecipeDef recipe) =>
+            recipe.requiredGiverWorkType ?? DefDatabase<WorkGiverDef>.AllDefsListForReading
+                .FirstOrDefault(g => g.fixedBillGiverDefs != null && g.fixedBillGiverDefs.Contains(bench.def))?.workType;
+
         static object BillsOf(Building bench)
         {
             var giver = (IBillGiver)bench;
@@ -859,6 +863,14 @@ namespace RimMcp
                         o["mode"] = bp.repeatMode.defName;
                         o["info"] = Clean(bp.RepeatInfoText);
                     }
+                    if (!b.recipe.skillRequirements.NullOrEmpty())
+                        o["needs"] = string.Join(", ", b.recipe.skillRequirements.Select(sr => $"{sr.skill.label} {sr.minLevel}"));
+                    // who would actually do it: work type enabled and skills high enough; empty = the bill never runs
+                    var work = BillWorkType(bench, b.recipe);
+                    o["doers"] = AllColonists().Where(p => !p.Downed && p.workSettings != null && p.workSettings.EverWork &&
+                            (work == null || (!p.WorkTypeIsDisabled(work) && p.workSettings.GetPriority(work) > 0)) &&
+                            b.recipe.PawnSatisfiesSkillRequirements(p))
+                        .Select(p => (object)(work == null ? p.LabelShort : $"{p.LabelShort}({p.workSettings.GetPriority(work)})")).ToList();
                     return (object)o;
                 }).ToList(),
                 ["recipes"] = bench.def.AllRecipes.Where(rc => rc.AvailableNow && rc.AvailableOnNow(bench)).Select(rc => (object)rc.defName).ToList(),

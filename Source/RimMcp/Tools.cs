@@ -121,7 +121,24 @@ namespace RimMcp
             r["downed"] = p.Downed;
             r["drafted"] = p.Drafted;
             r["job"] = Clean(p.jobs?.curDriver?.GetReport());
+            // a player-forced job (e.g. "Rest until healed") keeps the pawn from eating by itself
+            if (p.CurJob != null && p.CurJob.playerForced) r["forcedJob"] = true;
+            if (p.InBed()) r["inBed"] = true;
+            if (p.needs?.food != null) r["foodPct"] = Pct(p.needs.food.CurLevelPercentage);
+            var sick = p.health.hediffSet.hediffs.Where(h => h.Visible && h.def.lethalSeverity > 0f && h.TryGetComp<HediffComp_Immunizable>() != null).ToList();
+            if (sick.Count > 0) r["diseases"] = sick.Select(h => (object)DiseaseInfo(h)).ToList();
             return r;
+        }
+
+        // Disease race: severity vs immunity, both toward 100; the pawn dies at 100% severity.
+        static string DiseaseInfo(Hediff h)
+        {
+            var imm = h.TryGetComp<HediffComp_Immunizable>();
+            var tend = h.TryGetComp<HediffComp_TendDuration>();
+            var s = $"{Clean(h.LabelBaseCap)} severity {Pct(h.Severity / h.def.lethalSeverity)}%";
+            if (imm != null) s += $", immunity {Pct(imm.Immunity)}%";
+            if (tend != null) s += tend.IsTended ? $", tended {Pct(tend.tendQuality)}%" : ", NOT tended";
+            return s;
         }
 
         static object Colonists(Dictionary<string, object> a)
