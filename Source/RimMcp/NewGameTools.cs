@@ -240,6 +240,21 @@ namespace RimMcp
                         var list = gi.startingAndOptionalPawns;
                         var tmp = list[l[0]]; list.RemoveAt(l[0]); list.Insert(l[1], tmp);
                     }
+                    if (a.ContainsKey("template"))
+                    {
+                        // Colony Template (nahuel.colonytemplate), soft dependency: same call as its
+                        // "Load template" button on this page
+                        var files = GenTypes.GetTypeInAnyAssembly("ColonyTemplate.TemplateFiles")
+                            ?? throw new ToolError("Colony Template mod is not active");
+                        var apply = GenTypes.GetTypeInAnyAssembly("ColonyTemplate.CrewApply");
+                        object crew;
+                        try { crew = files.GetMethod("Load").Invoke(null, new object[] { Str(a, "template") }); }
+                        catch (TargetInvocationException e) { throw new ToolError("template load failed: " + e.InnerException?.Message); }
+                        if (crew == null) throw new ToolError("no template named " + Str(a, "template"));
+                        var problems = new StringBuilder();
+                        apply.GetMethod("ApplyToStartingPawns").Invoke(null, new object[] { crew, problems });
+                        if (problems.Length > 0) throw new ToolError("template applied with problems:\n" + problems);
+                    }
                     if (a.ContainsKey("nick"))
                     {
                         int i = Int(a, "index");

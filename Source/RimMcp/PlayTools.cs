@@ -865,6 +865,18 @@ namespace RimMcp
             };
         }
 
+        // Only one material for a stuff-made product (steel longsword, not silver); fixed ingredients stay allowed.
+        static void RestrictToStuff(Bill bill, string stuffName)
+        {
+            if (!(bill.recipe.ProducedThingDef?.MadeFromStuff ?? false)) throw new ToolError(bill.recipe.defName + " is not made from a material");
+            var stuff = DefDatabase<ThingDef>.AllDefs.FirstOrDefault(d => d.IsStuff && bill.recipe.fixedIngredientFilter.Allows(d) &&
+                            (string.Equals(d.defName, stuffName, StringComparison.OrdinalIgnoreCase) || string.Equals(d.label, stuffName, StringComparison.OrdinalIgnoreCase)))
+                        ?? throw new ToolError($"'{stuffName}' is not a material for {bill.recipe.defName}. Options: " +
+                            string.Join(", ", bill.recipe.fixedIngredientFilter.AllowedThingDefs.Where(d => d.IsStuff).Select(d => d.defName)));
+            bill.ingredientFilter.SetDisallowAll();
+            bill.ingredientFilter.SetAllow(stuff, true);
+        }
+
         static object Bills(Dictionary<string, object> a)
         {
             var map = CurMap();
@@ -895,6 +907,7 @@ namespace RimMcp
                         else if (a.ContainsKey("count")) { bp.repeatMode = BillRepeatModeDefOf.RepeatCount; bp.repeatCount = Int(a, "count"); }
                         else if (Bool(a, "forever", false)) bp.repeatMode = BillRepeatModeDefOf.Forever;
                     }
+                    if (a.ContainsKey("stuff")) RestrictToStuff(bill, Str(a, "stuff"));
                     stack.AddBill(bill);
                     return BillsOf(bench);
                 }
@@ -912,6 +925,7 @@ namespace RimMcp
                         if (a.ContainsKey("count")) { bp.repeatMode = BillRepeatModeDefOf.RepeatCount; bp.repeatCount = Int(a, "count"); }
                         if (Bool(a, "forever", false)) bp.repeatMode = BillRepeatModeDefOf.Forever;
                     }
+                    if (a.ContainsKey("stuff")) RestrictToStuff(bill, Str(a, "stuff"));
                     return BillsOf(bench);
                 }
                 default: throw new ToolError("action: list, add, remove, suspend, resume, set");
@@ -1043,9 +1057,17 @@ namespace RimMcp
                     ps.medCare = mc;
                 }
                 if (a.ContainsKey("selfTend")) ps.selfTend = Bool(a, "selfTend", false);
+                var outfit = Str(a, "outfit", false);
+                if (outfit != null && p.outfits != null)
+                {
+                    var all = Current.Game.outfitDatabase.AllOutfits;
+                    p.outfits.CurrentApparelPolicy = all.FirstOrDefault(o => string.Equals(o.label, outfit, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new ToolError("outfit: " + string.Join(", ", all.Select(o => o.label)));
+                }
                 res[p.LabelShort] = new Dictionary<string, object>
                 {
                     ["hostility"] = ps.hostilityResponse.ToString(), ["medicine"] = ps.medCare.ToString(), ["selfTend"] = ps.selfTend,
+                    ["outfit"] = p.outfits?.CurrentApparelPolicy?.label,
                     ["area"] = ps.AreaRestrictionInPawnCurrentMap?.Label ?? "unrestricted",
                     ["schedule"] = p.timetable != null ? ScheduleString(p) : null,
                 };

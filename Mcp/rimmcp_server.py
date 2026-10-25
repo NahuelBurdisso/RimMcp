@@ -136,10 +136,11 @@ TOOLS += [
      "inputSchema": obj({"set": {"type": "string"}, "finished": {"type": "boolean"}})},
     {"name": "bills", "read": False,
      "description": "Workbench bills. action list (no bench = all benches), add (recipe; target = do until you have X, "
-                    "or count, or forever), remove/suspend/resume/set (index). bench = id or defName, or x,z of the bench.",
+                    "or count, or forever; stuff = only this material, e.g. Steel), remove/suspend/resume/set (index). bench = id or defName, or x,z of the bench.",
      "inputSchema": obj({"action": {"type": "string"}, "bench": {"type": "string"}, "x": {"type": "integer"},
                          "z": {"type": "integer"}, "recipe": {"type": "string"}, "target": {"type": "integer"},
-                         "count": {"type": "integer"}, "forever": {"type": "boolean"}, "index": {"type": "integer"}})},
+                         "count": {"type": "integer"}, "forever": {"type": "boolean"}, "index": {"type": "integer"},
+                         "stuff": {"type": "string"}})},
     {"name": "forbid", "read": False,
      "description": "Forbid (forbidden=true) or allow (false) things: by id, or all forbiddable things in a rectangle "
                     "(optional query filter).",
@@ -154,8 +155,9 @@ TOOLS += [
      "inputSchema": obj({**NAMES, "schedule": {"type": "string"}})},
     {"name": "pawn_settings", "read": False,
      "description": "Read or set per-colonist settings: hostility (Ignore/Attack/Flee), medicine (NoCare, NoMeds, "
-                    "HerbalOrWorse, NormalOrWorse, Best), selfTend. Also shows area and schedule.",
-     "inputSchema": obj({**NAMES, "hostility": {"type": "string"}, "medicine": {"type": "string"}, "selfTend": {"type": "boolean"}})},
+                    "HerbalOrWorse, NormalOrWorse, Best), selfTend, outfit (apparel policy label). Also shows area and schedule.",
+     "inputSchema": obj({**NAMES, "hostility": {"type": "string"}, "medicine": {"type": "string"}, "selfTend": {"type": "boolean"},
+                         "outfit": {"type": "string"}})},
     {"name": "drafted_move", "read": False,
      "description": "Draft colonists (if needed) and order them to a cell; several colonists spread over nearby cells. "
                     "Drafted colonists with ranged weapons shoot enemies in range by themselves.",
@@ -180,7 +182,7 @@ TOOLS += [
      "inputSchema": obj({})},
     {"name": "choose", "read": False,
      "description": "Answer a decision from dialogs: window + option (index or text; message boxes A/B/C; 'close'), "
-                    "name dialogs: option 'name' + name (+ second); ritual/ceremony start windows: option 'begin' or 'cancel'; letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
+                    "name dialogs: option 'name' + name (+ second); ritual/ceremony start windows: option 'begin' or 'cancel'; growth moments: option 'passions=SkillA,SkillB;trait=INDEX'; letter + option (index/text, 'open', 'dismiss'), or quest + option accept/dismiss (+ reward index, accepter).",
      "inputSchema": obj({"window": {"type": "integer"}, "letter": {"type": "integer"}, "quest": {"type": "integer"},
                          "option": {"type": "string"}, "reward": {"type": "integer"}, "accepter": {"type": "string"},
                          "name": {"type": "string"}, "second": {"type": "string"}})},
@@ -194,14 +196,14 @@ TOOLS.append(
     {"name": "newgame", "read": False,
      "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | open (Page_SelectScenario) "
                     "| set (scenario=name; storyteller, difficulty, permadeath; seed, planetCoverage; tile; ideo=classic; "
-                    "reroll=[i..], swap=[i,j], index+nick) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
+                    "reroll=[i..], swap=[i,j], index+nick, template=<Colony Template name>) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
                     "river, coastal, feature, limit) | next | back | confirm | cancel (confirmation boxes).",
      "inputSchema": obj({"action": {"type": "string"}, "scenario": {"type": "string"}, "storyteller": {"type": "string"},
                          "difficulty": {"type": "string"}, "permadeath": {"type": "boolean"}, "seed": {"type": "string"},
                          "planetCoverage": {"type": "number"}, "tile": {"type": "integer"}, "ideo": {"type": "string"},
                          "reroll": {"type": "array", "items": {"type": "integer"}},
                          "swap": {"type": "array", "items": {"type": "integer"}}, "index": {"type": "integer"},
-                         "nick": {"type": "string"}, "name": {"type": "string"}, "biome": {"type": "string"},
+                         "nick": {"type": "string"}, "template": {"type": "string"}, "name": {"type": "string"}, "biome": {"type": "string"},
                          "hilliness": {"type": "array", "items": {"type": "string"}}, "minTemp": {"type": "number"},
                          "maxTemp": {"type": "number"}, "minGrowingTwelfths": {"type": "integer"},
                          "river": {"type": "boolean"}, "coastal": {"type": "boolean"}, "feature": {"type": "string"},

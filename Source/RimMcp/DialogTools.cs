@@ -86,6 +86,7 @@ namespace RimMcp
                     d["buttons"] = b;
                 }
                 else if (w is Dialog_BeginLordJob lj) DescribeLordJob(lj, d);
+                else if (w is Dialog_GrowthMomentChoices gm) DescribeGrowthMoment(gm, d);
                 else if (w is Dialog_Trade || TradeSession.Active && w.GetType().Name.Contains("Trade")) d["note"] = "trade screen open: use the trade tool";
                 else if (w is Dialog_GiveName gn)
                 {
@@ -134,6 +135,49 @@ namespace RimMcp
                 .Select(q => (object)$"{q.id}: {Clean(q.name)}").ToList();
             if (pauseReason != null) r["lastAutoPause"] = pauseReason;
             return r;
+        }
+
+        // Growth moment (child birthday): pick passions and a trait, like the dialog's OK button.
+        static ChoiceLetter_GrowthMoment GrowthLetter(Dialog_GrowthMomentChoices gm) =>
+            (ChoiceLetter_GrowthMoment)GetField(gm, "letter");
+
+        static void DescribeGrowthMoment(Dialog_GrowthMomentChoices gm, Dictionary<string, object> d)
+        {
+            var l = GrowthLetter(gm);
+            d["title"] = Clean(l.Label.ToString());
+            d["pawn"] = l.pawn?.LabelShort;
+            d["text"] = Trim(Clean(l.text.Resolve()), 1500);
+            d["passionGains"] = l.passionGainsCount;
+            if (!l.passionChoices.NullOrEmpty())
+                d["passionChoices"] = l.passionChoices.Select(s => (object)$"{s.defName} (now {l.pawn.skills.GetSkill(s).passion}, level {l.pawn.skills.GetSkill(s).Level})").ToList();
+            if (!l.traitChoices.NullOrEmpty())
+                d["traitChoices"] = l.traitChoices.Select((t, i) => (object)$"{i}: {(t == ChoiceLetter_GrowthMoment.NoTrait ? "no trait" : Clean(t.LabelCap))}").ToList();
+            d["note"] = "answer with choose window=N option='passions=SkillA,SkillB;trait=INDEX' (either part may be left out when there is nothing to choose)";
+        }
+
+        static object ChooseGrowthMoment(Dialog_GrowthMomentChoices gm, string opt)
+        {
+            var l = GrowthLetter(gm);
+            var parts = opt.Split(';').Select(p => p.Split(new[] { '=' }, 2)).Where(p => p.Length == 2)
+                .ToDictionary(p => p[0].Trim().ToLowerInvariant(), p => p[1].Trim());
+            var skills = new List<SkillDef>();
+            if (parts.TryGetValue("passions", out var ps) && ps.Length > 0)
+                foreach (var name in ps.Split(','))
+                    skills.Add(l.passionChoices?.FirstOrDefault(s => string.Equals(s.defName, name.Trim(), StringComparison.OrdinalIgnoreCase))
+                        ?? throw new ToolError($"'{name.Trim()}' is not a passion choice: " + string.Join(", ", (l.passionChoices ?? new List<SkillDef>()).Select(s => s.defName))));
+            if (!l.passionChoices.NullOrEmpty() && skills.Count != l.passionGainsCount)
+                throw new ToolError($"pick exactly {l.passionGainsCount} passion(s)");
+            Trait trait = null;
+            if (!l.traitChoices.NullOrEmpty())
+            {
+                if (!parts.TryGetValue("trait", out var ts) || !int.TryParse(ts, out var ti) || ti < 0 || ti >= l.traitChoices.Count)
+                    throw new ToolError($"trait=INDEX required, 0..{l.traitChoices.Count - 1}");
+                trait = l.traitChoices[ti];
+            }
+            l.MakeChoices(skills, trait);
+            gm.Close();
+            Find.LetterStack.RemoveLetter(l);
+            return $"{l.pawn?.LabelShort}: passions {(skills.Count == 0 ? "none" : string.Join(", ", skills.Select(s => s.defName)))}, trait {(trait == null || trait == ChoiceLetter_GrowthMoment.NoTrait ? "none" : Clean(trait.LabelCap))}";
         }
 
         static DiaOption PickOption(List<DiaOption> opts, Dictionary<string, object> a)
@@ -204,6 +248,7 @@ namespace RimMcp
                     return "pressed " + key;
                 }
                 if (w is Dialog_BeginLordJob lj) return ChooseLordJob(lj, opt);
+                if (w is Dialog_GrowthMomentChoices gm) return ChooseGrowthMoment(gm, opt);
                 throw new ToolError(w.GetType().Name + " has no automatic answer; option 'close' closes it");
             }
             if (a.ContainsKey("letter"))
