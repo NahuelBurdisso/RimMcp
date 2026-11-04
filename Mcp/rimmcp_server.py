@@ -91,9 +91,10 @@ TOOLS += [
     {"name": "map_view", "read": True,
      "description": "The current map as a text grid (north up) with a legend, plus a list of buildings, items and "
                     "pawns with coordinates. No x/z = whole map (use step 4 or 5 for an overview). layers: main "
-                    "(things, zones, terrain), roof, fertility, build (what the terrain can carry: heavy for walls). Unexplored cells show as '?'.",
+                    "(things, zones, terrain), roof, fertility, build (what the terrain can carry: heavy for walls), "
+                    "plan (planned walls/doors/objects/floors and vanilla plans). Unexplored cells show as '?'.",
      "inputSchema": obj({**RECT, "step": {"type": "integer", "default": 1},
-                         "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility", "build"]}},
+                         "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility", "build", "plan"]}},
                          "objects": {"type": "boolean"}, "maxObjects": {"type": "integer"}})},
     {"name": "things", "read": True,
      "description": "Find things on the map: by query (defName or label part), kind (item, building, plant, pawn, "
@@ -112,9 +113,11 @@ TOOLS += [
     {"name": "build", "read": False,
      "description": "Place blueprints of a buildable def (ThingDef or floor TerrainDef). 1x1 defs fill the rectangle "
                     "(outline=true: only its border, for walls of a room); multi-cell defs place one at x,z (center). "
-                    "rot: north/east/south/west. stuff: material defName (WoodLog, Steel, BlocksGranite...).",
+                    "rot: north/east/south/west. stuff: material defName (WoodLog, Steel, BlocksGranite...). "
+                    "planned=true: forbidden blueprints nobody builds until plan action=approve (default: on while "
+                    "Plan On The Fly's toggle is on).",
      "inputSchema": obj({"def": {"type": "string"}, **RECT, "rot": {"type": "string"}, "stuff": {"type": "string"},
-                         "outline": {"type": "boolean"}}, ["def", "x", "z"])},
+                         "outline": {"type": "boolean"}, "planned": {"type": "boolean"}}, ["def", "x", "z"])},
     {"name": "zones", "read": True,
      "description": "All zones (growing with plant, stockpiles with priority, bounds) and areas (home, roof, allowed).",
      "inputSchema": obj({})},
@@ -266,6 +269,19 @@ TOOLS.append(
                          "since": {"type": "integer", "description": "events: cursor (seq) returned as next"},
                          "tick": {"type": "integer", "description": "events: from this game tick on"},
                          "limit": {"type": "integer"}})})
+TOOLS.append(
+    {"name": "plan", "read": False,
+     "description": "Plan without building. action: list (default; plans and planned blueprints, optional rect) | draw "
+                    "(rect, outline; type wall/door/object/floor = Planning Extended typed plan, color = Structure "
+                    "palette: White, Blue, Red, GreenPastel...; type area = vanilla plan, color Gray/Red/Orange/Yellow/"
+                    "Green/Cyan/Blue/Purple/Pink, name) | erase (rect, optional type) | mode (on: Plan On The Fly "
+                    "toggle, every new blueprint placed forbidden) | approve (rect or all, query: unforbid planned "
+                    "blueprints so colonists build them) | shelve (forbid blueprints again). Plans never get built; "
+                    "build planned=true places real blueprints that wait for approve.",
+     "inputSchema": obj({"action": {"type": "string", "enum": ["list", "draw", "erase", "mode", "approve", "shelve"]},
+                         **RECT, "type": {"type": "string", "enum": ["wall", "door", "object", "floor", "area"]},
+                         "color": {"type": "string"}, "outline": {"type": "boolean"}, "name": {"type": "string"},
+                         "on": {"type": "boolean"}, "all": {"type": "boolean"}, "query": {"type": "string"}})})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 

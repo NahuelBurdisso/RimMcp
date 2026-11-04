@@ -48,6 +48,7 @@ namespace RimMcp
                 ["switch"] = Switch,
                 ["gizmos"] = Gizmos,
                 ["governor"] = GovernorTool,
+                ["plan"] = PlanTool,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }
@@ -147,7 +148,7 @@ namespace RimMcp
                     ch = p.IsColonist ? '@' : p.HostileTo(Faction.OfPlayer) ? 'E' : p.RaceProps.Animal ? (p.Faction == Faction.OfPlayer ? 'A' : 'a') : 'h';
                 }
                 else if (t.def == ThingDefOf.Fire) { rank = 8; ch = 'F'; }
-                else if (t is Blueprint) { rank = 6; ch = 'b'; }
+                else if (t is Blueprint) { rank = 6; ch = t.IsForbidden(Faction.OfPlayer) ? 'p' : 'b'; }
                 else if (t is Frame) { rank = 6; ch = 'f'; }
                 else if (t.def.category == ThingCategory.Building)
                 {
@@ -222,7 +223,7 @@ namespace RimMcp
 
         const string MapLegend =
             "north is up. ?=unexplored @=colonist A=colony animal a=wild animal E=hostile h=other person " +
-            "F=fire #=wall/solid building +=door B=other building '=conduit b=blueprint f=frame(under construction) " +
+            "F=fire #=wall/solid building +=door B=other building '=conduit b=blueprint p=planned blueprint (forbidden: not built until approved) f=frame(under construction) " +
             "R=natural rock O=ore/resource rock T=tree c=crop i=item k=stone chunk g=growing zone s=stockpile z=other zone " +
             "terrain: ,=rich soil .=soil :=poor soil(gravel/sand) -=infertile ground _=floor ~=shallow water/marsh " +
             "W=deep water X=impassable ==bridge";
@@ -247,10 +248,11 @@ namespace RimMcp
                 switch (layer)
                 {
                     case "main": f = CellChar; r["legend"] = MapLegend; break;
+                    case "plan": f = PlanChar; r["planLegend"] = PlanLegend; break;
                     case "roof": f = RoofChar; r["roofLegend"] = ".=open sky c=constructed roof t=thin rock roof M=overhead mountain (thick, cannot be removed; nothing drops through)"; break;
                     case "fertility": f = FertChar; r["fertilityLegend"] = ".=0 (cannot grow), 5=100%, 7=140% (rich soil)"; break;
                     case "build": f = BuildChar; r["buildLegend"] = "H=heavy (walls, turrets) m=medium l=light only x=nothing (mud, water) X=impassable; terrain only, ignores what stands on it"; break;
-                    default: throw new ToolError("layers: main, roof, fertility, build");
+                    default: throw new ToolError("layers: main, roof, fertility, build, plan");
                 }
                 var lines = new List<object>();
                 var axis = new StringBuilder("     ");
@@ -289,7 +291,7 @@ namespace RimMcp
                         else continue;
                         var o = new Dictionary<string, object> { ["label"] = Clean(t.LabelCap), ["kind"] = kind, ["pos"] = Pos(t.Position) };
                         if (t.def.size != IntVec2.One && t.def.category == ThingCategory.Building) o["size"] = new List<object> { t.RotatedSize.x, t.RotatedSize.z };
-                        if (kind == "item" && t.IsForbidden(Faction.OfPlayer)) o["forbidden"] = true;
+                        if ((kind == "item" || kind == "blueprint") && t.IsForbidden(Faction.OfPlayer)) o["forbidden"] = true;
                         if (kind == "building" || kind == "blueprint" || kind == "frame") o["id"] = t.ThingID;
                         objs.Add(o);
                     }
@@ -340,6 +342,7 @@ namespace RimMcp
                         if (t.IsForbidden(Faction.OfPlayer)) o["forbidden"] = true;
                         o["stored"] = t.IsInAnyStorage();
                     }
+                    if (t is Blueprint && t.IsForbidden(Faction.OfPlayer)) o["forbidden"] = true;
                     if (t is Pawn p)
                     {
                         if (p.Faction != null) o["faction"] = p.Faction.Name;
@@ -511,6 +514,8 @@ namespace RimMcp
             else if (stuffName != null) throw new ToolError($"{def.defName} is not made from stuff; drop the stuff argument");
             var rect = Rect(a, map, 5000);
             bool outline = Bool(a, "outline", false);
+            // planned: forbidden blueprints nobody builds until plan approve (default: Plan On The Fly's toggle)
+            bool planned = Bool(a, "planned", PlanOnTheFlyMode() == true);
             var size = def is ThingDef t2 ? t2.size : IntVec2.One;
             var placed = new List<object>();
             var reasons = new Dictionary<string, int>();
@@ -520,7 +525,12 @@ namespace RimMcp
             foreach (var c in cells.ToList())
             {
                 var rep = des.CanDesignateCell(c);
-                if (rep.Accepted) { des.DesignateSingleCell(c); placed.Add(Pos(c)); }
+                if (rep.Accepted)
+                {
+                    des.DesignateSingleCell(c);
+                    placed.Add(Pos(c));
+                    if (planned) SetPlanned(map, c, def, true);
+                }
                 else AddReason(reasons, rep);
             }
             var r = new Dictionary<string, object>
@@ -528,6 +538,7 @@ namespace RimMcp
                 ["def"] = def.defName, ["stuff"] = des.StuffDef?.defName, ["rot"] = des.Rot.ToStringHuman(),
                 ["placed"] = placed.Count, ["costEach"] = CostText(def, des.StuffDef),
             };
+            if (planned) r["planned"] = "forbidden blueprints: nobody builds them until plan action=approve";
             if (size != IntVec2.One)
             {
                 r["note"] = $"multi-cell ({size.x}x{size.z}); x,z is the building's center cell" +
