@@ -32,6 +32,35 @@ namespace RimMcp
                     return GovernorStatus();
                 }
                 case "set_stations": return GovernorSetStations(a);
+                case "steward":
+                case "research_queue":
+                {
+                    // steward settings: queue (research defNames, in order), reflexes {name: bool}, enabled
+                    GovernorPolicy.Poll(force: true);
+                    var p = GovernorPolicy.Current.Clone();
+                    var unknown = new List<object>();
+                    if (a.TryGetValue("queue", out var qv) && qv is List<object> ql)
+                    {
+                        p.steward.researchQueue = ql.Where(x => x != null).Select(x => x.ToString()).ToList();
+                        unknown.AddRange(p.steward.researchQueue.Where(n => DefDatabase<ResearchProjectDef>.GetNamedSilentFail(n) == null));
+                    }
+                    if (a.TryGetValue("reflexes", out var rv) && rv is Dictionary<string, object> rd)
+                        foreach (var kv in rd)
+                        {
+                            if (!StewardPolicy.Reflexes.Contains(kv.Key)) throw new ToolError("unknown reflex " + kv.Key + ". Known: " + string.Join(", ", StewardPolicy.Reflexes));
+                            if (kv.Value is bool b) p.steward.reflexes[kv.Key] = b;
+                        }
+                    if (a.TryGetValue("on", out var ov) && ov is bool on) p.steward.enabled = on;
+                    GovernorPolicy.Save(p);
+                    var r = new Dictionary<string, object>
+                    {
+                        ["steward"] = p.ToObject()["steward"],
+                        ["governorEnabled"] = p.enabled,
+                    };
+                    if (unknown.Count > 0) r["unknownProjects"] = unknown;
+                    if (!p.enabled) r["note"] = "the governor is disabled: the steward runs only while it is enabled (action enable)";
+                    return r;
+                }
                 case "events":
                 {
                     long? since = a.TryGetValue("since", out var s) && s is double sd ? (long)sd : (long?)null;

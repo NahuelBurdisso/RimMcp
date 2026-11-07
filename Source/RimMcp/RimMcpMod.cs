@@ -29,6 +29,7 @@ namespace RimMcp
         public void Update()
         {
             Bridge.DrainOnMainThread();
+            try { Steward.Frame(); } catch (System.Exception e) { Log.ErrorOnce("[RimMcp] steward frame: " + e, 0x52a3c2); }
             try { Tools.Tick(); } catch (System.Exception e) { Log.ErrorOnce("[RimMcp] auto-pause: " + e, 0x52a3c1); }
         }
 

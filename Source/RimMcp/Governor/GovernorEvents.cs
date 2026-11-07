@@ -46,6 +46,14 @@ namespace RimMcp
             e["type"] = type;
             if (details != null) foreach (var kv in details) e[kv.Key] = kv.Value;
             recent.Add(e);
+            try
+            {
+                var sp = GovernorPolicy.Current.steward;
+                if (sp != null && sp.enabled && sp.On("stopRun") && sp.stopOn.Contains(type))
+                    Tools.RequestStop(type + (details != null && details.TryGetValue("pawn", out var pw) ? " " + pw : "") +
+                                      (details != null && details.TryGetValue("reason", out var rs) ? ": " + rs : ""));
+            }
+            catch { }
             if (recent.Count > 50) recent.RemoveAt(0);
             try
             {

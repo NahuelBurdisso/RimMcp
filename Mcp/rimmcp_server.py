@@ -265,8 +265,16 @@ TOOLS.append(
                     "unforbids loot. Never touches a colonist Claude drafted or ordered during the fight. Policy: "
                     "governor.json (path in the output, hot-reloaded). action: status (default; policy, per-map threat, "
                     "assignments, last events) | enable | disable | reload | set_stations (cells [[x,z],...], map id or "
-                    "'home'; empty = automatic) | events (since = cursor from the last call, or tick; returns events + next).",
-     "inputSchema": obj({"action": {"type": "string", "enum": ["status", "enable", "disable", "reload", "set_stations", "events"]},
+                    "'home'; empty = automatic) | events (since = cursor from the last call, or tick; returns events + next) | "
+                    "steward (queue, reflexes, on): the peacetime steward - tends/feeds/rescues patients by prioritized orders, "
+                    "clears forced bed rest, starts the next queued research, closes 'research finished' boxes, dismisses "
+                    "routine letters, sets new freezer coolers to -10, gives new colonists the common area, unforbids a "
+                    "downed colonist's weapon; reports power/thermostat/unroofed-valuables problems (needs_attention) and "
+                    "disease races (decision_needed). Events in steward.stopOn stop a running `run` at once.",
+     "inputSchema": obj({"action": {"type": "string", "enum": ["status", "enable", "disable", "reload", "set_stations", "events", "steward", "research_queue"]},
+                         "queue": {"type": "array", "items": {"type": "string"}, "description": "steward/research_queue: research defNames in order; the steward starts the first startable one when nothing is being researched"},
+                         "reflexes": {"type": "object", "description": "steward: {reflex: bool} rescue, tend, feedPatients, clearForcedRest, diseaseAlarm, research, closeRoutineWindows, dismissRoutineLetters, power, thermostats, newColonistArea, unforbidWeapons, roofValuables, stopRun"},
+                         "on": {"type": "boolean", "description": "steward: turn the steward section on/off"},
                          "map": {"type": "string", "description": "set_stations: map id, 'home' or omitted (current map)"},
                          "cells": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
                          "since": {"type": "integer", "description": "events: cursor (seq) returned as next"},

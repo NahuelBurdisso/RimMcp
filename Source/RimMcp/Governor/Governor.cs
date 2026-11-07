@@ -140,6 +140,7 @@ namespace RimMcp
 
         public override void FinalizeInit()
         {
+            Steward.Reset();
             wasEnabled = false;
             policyPolled = false;
             states.Clear();
@@ -202,6 +203,9 @@ namespace RimMcp
             {
                 watch.Slow();
                 Prune();
+                var homes = Find.Maps;
+                for (int i = 0; i < homes.Count; i++)
+                    if (homes[i].IsPlayerHome) Steward.Slow(homes[i]);
             }
         }
 

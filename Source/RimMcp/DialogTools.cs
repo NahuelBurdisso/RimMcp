@@ -201,7 +201,14 @@ namespace RimMcp
                 if (wi < 0 || wi >= all.Count) throw new ToolError($"no window {wi} (open: {all.Count}); call dialogs first");
                 var w = all[wi];
                 var opt = Str(a, "option");
-                if (opt == "close") { w.Close(); return "closed " + w.GetType().Name; }
+                if (opt == "close")
+                {
+                    // a trade window closed with pending counts executes them under Dynamic Trade Interface: reset first
+                    bool trade = w is Dialog_Trade || TradeSession.Active && w.GetType().Name.Contains("Trade");
+                    if (trade && TradeSession.deal != null) TradeSession.deal.Reset();
+                    w.Close();
+                    return "closed " + w.GetType().Name + (trade ? " (trade counts reset first)" : "");
+                }
                 if (w is Dialog_NodeTree nt)
                 {
                     var node = (DiaNode)curNodeField.GetValue(nt);
@@ -376,7 +383,12 @@ namespace RimMcp
                     dlg.Close(doCloseSound: false);
                     return traded ? "trade done" : "nothing was traded; screen closed";
                 }
-                case "cancel": dlg.Close(); return "trade cancelled";
+                case "cancel":
+                    // Dynamic Trade Interface executes a pending deal when its window closes (800 silver went into wood):
+                    // zero every count first, then close
+                    deal.Reset();
+                    dlg.Close();
+                    return "trade cancelled (pending counts reset first)";
                 default: throw new ToolError("action: list, set, reset, execute, cancel");
             }
         }

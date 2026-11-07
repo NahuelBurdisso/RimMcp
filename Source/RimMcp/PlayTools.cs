@@ -1390,6 +1390,13 @@ namespace RimMcp
         public static int pauseAtTick = -1;
         public static int lastLetterId = -1;
         public static string pauseReason;
+        static string stopRequest;
+
+        // the steward/governor asks a running `run` to stop now (an event Claude must see)
+        public static void RequestStop(string why)
+        {
+            if (pauseAtTick >= 0 && stopRequest == null) stopRequest = why;
+        }
 
         // Unpause for N in-game hours, then pause again (checked every frame by the pump).
         static object RunFor(Dictionary<string, object> a)
@@ -1403,6 +1410,7 @@ namespace RimMcp
             pauseAtTick = Find.TickManager.TicksGame + (int)(hours * GenDate.TicksPerHour);
             lastLetterId = Find.LetterStack.LettersListForReading.Count > 0 ? Find.LetterStack.LettersListForReading.Max(l => l.ID) : lastLetterId;
             pauseReason = null;
+            stopRequest = null;
             SetSpeed(new Dictionary<string, object> { ["speed"] = speed });
             return new Dictionary<string, object> { ["until"] = pauseAtTick, ["speed"] = Find.TickManager.CurTimeSpeed.ToString() };
         }
@@ -1421,15 +1429,19 @@ namespace RimMcp
                     if (l.ID <= lastLetterId) continue;
                     lastLetterId = l.ID;
                     if (l.def == LetterDefOf.ThreatBig || l.def == LetterDefOf.ThreatSmall || l.def == LetterDefOf.Death ||
-                        l.def == LetterDefOf.NegativeEvent || (l is ChoiceLetter && !(l is StandardLetter) && !(l is NewQuestLetter)))
+                        l.def == LetterDefOf.NegativeEvent || (l is ChoiceLetter && !(l is StandardLetter) && !(l is NewQuestLetter) &&
+                        // informational letters of mods (YART_ResearchCompletedNeutral...) need no answer
+                        l.def.defName.IndexOf("Neutral", StringComparison.Ordinal) < 0 && l.def.defName.IndexOf("Positive", StringComparison.Ordinal) < 0))
                     { reason = "letter: " + Clean(l.Label); break; }
                 }
                 if (reason == null && Find.WindowStack.WindowsForcePause) reason = "dialog opened";
+                if (reason == null && stopRequest != null) reason = "event: " + stopRequest;
             }
             if (reason == null) return;
             tm.CurTimeSpeed = TimeSpeed.Paused;
             pauseAtTick = -1;
             pauseReason = reason;
+            stopRequest = null;
         }
 
         static object Save(Dictionary<string, object> a)

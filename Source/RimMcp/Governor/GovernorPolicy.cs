@@ -30,6 +30,7 @@ namespace RimMcp
         public bool shelter = true;
         // events
         public int maxFileKb = 512;
+        public StewardPolicy steward = new StewardPolicy();
 
         public static GovernorPolicy Current = new GovernorPolicy();
         public static string LastError;
@@ -109,6 +110,20 @@ namespace RimMcp
             }
             var n = O(root, "nonCombatants");
             if (n != null) p.shelter = B(n, "shelter", p.shelter);
+            var sw = O(root, "steward");
+            if (sw != null)
+            {
+                p.steward.enabled = B(sw, "enabled", p.steward.enabled);
+                var rf = O(sw, "reflexes");
+                if (rf != null) foreach (var kv in rf) if (kv.Value is bool bv) p.steward.reflexes[kv.Key] = bv;
+                if (sw.TryGetValue("researchQueue", out var rq) && rq is List<object> rql)
+                    p.steward.researchQueue = rql.Where(x => x != null).Select(x => x.ToString()).ToList();
+                if (sw.TryGetValue("stopOn", out var so) && so is List<object> sol)
+                    p.steward.stopOn = sol.Where(x => x != null).Select(x => x.ToString()).ToList();
+                p.steward.freezerTargetC = F(sw, "freezerTargetC", p.steward.freezerTargetC);
+                p.steward.forcedRestFoodPct = F(sw, "forcedRestFoodPct", p.steward.forcedRestFoodPct);
+                p.steward.feedBelowPct = F(sw, "feedBelowPct", p.steward.feedBelowPct);
+            }
             var e = O(root, "events");
             if (e != null) p.maxFileKb = Math.Max(16, (int)F(e, "maxFileKb", p.maxFileKb));
             p.retreatHealthPct = Math.Max(0f, Math.Min(1f, p.retreatHealthPct));
@@ -160,6 +175,15 @@ namespace RimMcp
             sb.Append("  \"rescue\": {\"downedColonists\": ").Append(rescueDowned ? "true" : "false")
               .Append(", \"captureDowned\": ").Append(captureDowned ? "true" : "false").Append("},\n");
             sb.Append("  \"nonCombatants\": {\"shelter\": ").Append(shelter ? "true" : "false").Append("},\n");
+            sb.Append("  \"steward\": {\n");
+            sb.Append("    \"enabled\": ").Append(steward.enabled ? "true" : "false").Append(",\n");
+            sb.Append("    \"reflexes\": {").Append(string.Join(", ", steward.reflexes.Select(kv => Json.Write(kv.Key) + ": " + (kv.Value ? "true" : "false")))).Append("},\n");
+            sb.Append("    \"researchQueue\": ").Append(Json.Write(steward.researchQueue)).Append(",\n");
+            sb.Append("    \"stopOn\": ").Append(Json.Write(steward.stopOn)).Append(",\n");
+            sb.Append("    \"freezerTargetC\": ").Append(Num(steward.freezerTargetC)).Append(",\n");
+            sb.Append("    \"forcedRestFoodPct\": ").Append(Num(steward.forcedRestFoodPct)).Append(",\n");
+            sb.Append("    \"feedBelowPct\": ").Append(Num(steward.feedBelowPct)).Append("\n");
+            sb.Append("  },\n");
             sb.Append("  \"events\": {\"maxFileKb\": ").Append(maxFileKb).Append("}\n");
             sb.Append("}\n");
             return sb.ToString();
