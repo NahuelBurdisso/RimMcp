@@ -28,7 +28,7 @@ namespace RimMcp
 
         public static void Reset()
         {
-            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear();
+            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear();
         }
 
         static void Did(Map map, string reflex, string what, Dictionary<string, object> more = null)
@@ -61,7 +61,15 @@ namespace RimMcp
                     if (On("answerNames")) AnswerName(gn);
                     continue;
                 }
+                if (w.GetType().Name.StartsWith("Dialog_ModFeatures"))
+                {
+                    // a mod's feature tour pauses the game (and stalls --ticks): a player clicks it away
+                    w.Close();
+                    Did(null, "closeRoutineWindows", "closed " + w.GetType().Name);
+                    continue;
+                }
                 string text = null;
+                if (w is Dialog_NodeTree fc && curNodeField?.GetValue(fc) is DiaNode fnode && On("forcedChoice") && ForcedChoice(fc, fnode)) continue;
                 if (w is Dialog_NodeTree nt && curNodeField?.GetValue(nt) is DiaNode node) text = node.text.Resolve()?.StripTags();
                 else if (w is Dialog_MessageBox mb) text = mb.text.Resolve()?.StripTags();
                 if (text == null) continue;
@@ -72,6 +80,24 @@ namespace RimMcp
                 w.Close();
                 Did(null, "closeRoutineWindows", "closed: " + text.Split('\n')[0]);
             }
+        }
+
+        static readonly MethodInfo diaActivate = typeof(DiaOption).GetMethod("Activate", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        static readonly FieldInfo diaText = typeof(DiaOption).GetField("text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        // an offer we cannot take ("Accept: need 742 silver", the other option "Reject"): the game leaves
+        // one answer, so it is not a decision. Only when there are 2+ options and exactly one is enabled.
+        static bool ForcedChoice(Dialog_NodeTree w, DiaNode node)
+        {
+            var opts = node.options;
+            if (opts == null || opts.Count < 2) return false;
+            var open = opts.Where(o => !o.disabled && o.hyperlink.def == null && o.hyperlink.quest == null).ToList();
+            if (open.Count != 1 || opts.Count(o => o.disabled) == 0) return false;
+            var label = (diaText?.GetValue(open[0]) as string)?.StripTags();
+            var title = node.text.Resolve()?.StripTags() ?? "";
+            diaActivate?.Invoke(open[0], null);
+            Did(null, "forcedChoice", $"only answer left: '{label}' to '{(title.Length > 70 ? title.Substring(0, 70) + "..." : title)}'");
+            return true;
         }
 
         const BindingFlags Inst = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -173,6 +199,32 @@ namespace RimMcp
             return false;
         }
 
+        static readonly Dictionary<int, int> lastThingOrder = new Dictionary<int, int>();
+
+        // "Prioritize <work>" on a building: the nearest colonist who has that work type on
+        static bool OrderOn(Map map, Thing target, string workGiver, string reflex, string what)
+        {
+            int now = Find.TickManager.TicksGame;
+            if (lastThingOrder.TryGetValue(target.thingIDNumber, out var t) && now - t < 2500) return true;   // already sent
+            var wg = DefDatabase<WorkGiverDef>.GetNamedSilentFail(workGiver);
+            if (!(wg?.Worker is WorkGiver_Scanner scanner)) return false;
+            if (map.mapPawns.FreeColonistsSpawned.Any(c => c.CurJob?.targetA.Thing == target && c.CurJob.def == JobDefOf.Refuel)) return true;
+            var helpers = map.mapPawns.FreeColonistsSpawned
+                .Where(c => !c.Downed && !c.Drafted && !c.InMentalState && c.workSettings != null && !c.WorkTypeIsDisabled(wg.workType) &&
+                            c.workSettings.WorkIsActive(wg.workType) && !(Governor.Instance?.Manual.Contains(c) ?? false) && !(c.CurJob?.playerForced ?? false))
+                .OrderBy(c => c.Position.DistanceToSquared(target.Position));
+            foreach (var c in helpers)
+            {
+                if (!scanner.HasJobOnThing(c, target, true)) continue;
+                var job = scanner.JobOnThing(c, target, true);
+                if (job == null || !c.jobs.TryTakeOrderedJobPrioritizedWork(job, scanner, target.Position)) continue;
+                lastThingOrder[target.thingIDNumber] = now;
+                Did(map, reflex, $"{c.LabelShort}: {what}", new Dictionary<string, object> { ["by"] = c.LabelShort });
+                return true;
+            }
+            return false;
+        }
+
         static void DiseaseAlarm(Map map, List<Pawn> pawns, int now)
         {
             foreach (var p in pawns)
@@ -235,7 +287,13 @@ namespace RimMcp
             {
                 string issue = null;
                 var fuel = b.TryGetComp<CompRefuelable>();
-                if (b.TryGetComp<CompPowerPlant>() != null && fuel != null && !fuel.HasFuel) issue = $"{b.LabelCap} out of fuel (haulers refuel it: is fuel in stock?)";
+                if (b.TryGetComp<CompPowerPlant>() != null && fuel != null && !fuel.HasFuel)
+                {
+                    // La Colina day 10: 611 wood in stock and the generator dry, refuelling sat behind hauling.
+                    // A player right-clicks "Prioritize refueling".
+                    if (On("refuel") && OrderOn(map, b, "Refuel", "refuel", $"refuel {b.LabelCap}")) { flagged.Remove(b.thingIDNumber); continue; }
+                    issue = $"{b.LabelCap} out of fuel and nobody can refuel it (fuel in stock? allowed? reachable?)";
+                }
                 var br = b.TryGetComp<CompBreakdownable>();
                 if (br != null && br.BrokenDown && comps == 0) issue = $"{b.LabelCap} broken down and no component in stock";
                 if (b is Building_TurretGun && b.TryGetComp<CompPowerTrader>() is CompPowerTrader pt && !pt.PowerOn) issue = $"{b.LabelCap} has no power";
@@ -306,7 +364,7 @@ namespace RimMcp
                 {
                     if (c.Roofed(map)) continue;
                     foreach (var t in c.GetThingList(map))
-                        if (t.def.category == ThingCategory.Item && (t.def.IsMedicine || t.def.IsApparel || t.def.IsWeapon || t.def == ThingDefOf.ComponentIndustrial || t.def.BaseMarketValue >= 8f))
+                        if (t.def.category == ThingCategory.Item && !(t is Corpse) && (t.def.IsMedicine || t.def.IsApparel || t.def.IsWeapon || t.def == ThingDefOf.ComponentIndustrial || t.def.BaseMarketValue >= 8f))
                         { open++; example = example ?? t.LabelCap; }
                 }
                 if (open > 0) Attention(map, "roofValuables", $"{z.label}: {open} valuable stacks under open sky ({example}...): they deteriorate", z.Cells.First());
@@ -321,7 +379,7 @@ namespace RimMcp
         {
             "rescue", "tend", "feedPatients", "clearForcedRest", "diseaseAlarm", "research", "closeRoutineWindows",
             "dismissRoutineLetters", "power", "thermostats", "newColonistArea", "unforbidWeapons", "roofValuables", "stopRun",
-            "answerNames",
+            "answerNames", "forcedChoice", "refuel",
         };
         public Dictionary<string, bool> reflexes = Reflexes.ToDictionary(r => r, r => true);
         public List<string> researchQueue = new List<string>();
