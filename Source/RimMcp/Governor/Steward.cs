@@ -186,7 +186,10 @@ namespace RimMcp
         {
             foreach (var l in Find.LetterStack.LettersListForReading.ToList())
             {
-                if (!(l.def == LetterDefOf.NeutralEvent || l.def == LetterDefOf.PositiveEvent)) continue;
+                // vanilla neutral/positive letters, and mods' informational ones (YART_...Neutral)
+                bool routine = l.def == LetterDefOf.NeutralEvent || l.def == LetterDefOf.PositiveEvent ||
+                               l.def.defName.IndexOf("Neutral", StringComparison.Ordinal) >= 0 || l.def.defName.IndexOf("Positive", StringComparison.Ordinal) >= 0;
+                if (!routine) continue;
                 if (!l.CanDismissWithRightClick || l is ChoiceLetter && !(l is StandardLetter)) continue;
                 var label = l.Label.ToString().StripTags();
                 if (label.StartsWith("Join offer") || label.StartsWith("Quest")) continue;
