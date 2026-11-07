@@ -79,7 +79,24 @@ namespace RimMcp
                     var name = Str(a, "name");
                     if (!SaveGameFilesUtility.SavedGameNamedExists(name)) throw new ToolError("no save named " + name);
                     GameDataSaveLoader.CheckVersionAndLoadGame(name);
+                    // a save made with another mod list opens Dialog_ModMismatch and waits for a click;
+                    // "Load anyway" is what restart/load means (anyway:false leaves the dialog open)
+                    var mismatch = Find.WindowStack.Windows.OfType<Dialog_ModMismatch>().FirstOrDefault();
+                    if (mismatch != null)
+                    {
+                        if (a.ContainsKey("anyway") && a["anyway"] is bool b && !b)
+                            return "mod list differs from the save: Dialog_ModMismatch is open (action load_anyway to continue)";
+                        mismatch.OnAcceptKeyPressed();
+                        return "loading " + name + " (mod list differs from the save: loaded anyway)";
+                    }
                     return "loading " + name;
+                }
+                case "load_anyway":
+                {
+                    var mismatch = Find.WindowStack.Windows.OfType<Dialog_ModMismatch>().FirstOrDefault()
+                        ?? throw new ToolError("no mod mismatch dialog open");
+                    mismatch.OnAcceptKeyPressed();
+                    return "loading anyway";
                 }
                 case "tiles": return FindTiles(a);
                 default: throw new ToolError("action: state, devmode_off, open, set, tiles, next, back, confirm, cancel");
