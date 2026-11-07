@@ -24,10 +24,25 @@ namespace RimMcp
 
         public static string StationKey(Map map) => map == PrimaryHome ? "home" : map.uniqueID.ToString();
 
+        static readonly HashSet<string> warnedStations = new HashSet<string>();
+
         public static List<IntVec3> PolicyStations(Map map, GovernorPolicy pol)
         {
-            if (pol.stations.TryGetValue(map.uniqueID.ToString(), out var l) && l.Count > 0) return l;
-            if (map == PrimaryHome && pol.stations.TryGetValue("home", out l) && l.Count > 0) return l;
+            List<IntVec3> l = null;
+            if (!(pol.stations.TryGetValue(map.uniqueID.ToString(), out l) && l.Count > 0) &&
+                !(map == PrimaryHome && pol.stations.TryGetValue("home", out l) && l.Count > 0)) return null;
+            // stations written for another game (a killbox of the last colony) point at cells that do not
+            // exist here or that nobody can stand on: use the ones that make sense, or go automatic
+            var home = HomeCenter(map, pol);
+            var ok = l.Where(c => c.InBounds(map) && c.Standable(map) && !c.Fogged(map) && c.InHorDistOf(home, 70f)).ToList();
+            if (ok.Count * 2 >= l.Count && ok.Count > 0) return ok;
+            var key = map.uniqueID + ":" + string.Join(";", l.Select(c => c.x + "," + c.z));
+            if (warnedStations.Add(key))
+                GovernorEvents.Emit("needs_attention", map, new Dictionary<string, object>
+                {
+                    ["reflex"] = "stations",
+                    ["what"] = $"{l.Count - ok.Count} of {l.Count} policy stations are off the map, blocked, fogged or far from home: automatic positions instead (governor set_stations to fix)",
+                });
             return null;
         }
 
