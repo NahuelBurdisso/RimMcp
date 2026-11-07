@@ -131,6 +131,13 @@ namespace RimMcp
             if (GovernorPolicy.LastError != null)
                 throw new ToolError("governor.json has an error, fix it first: " + GovernorPolicy.LastError);
             var p = GovernorPolicy.Current.Clone();
+            if (p.stationsGame != GovernorPolicy.GameKey())
+            {
+                // another game's stations and center go: they mean nothing on this map
+                p.stations.Clear();
+                p.homeCenter = IntVec3.Invalid;
+            }
+            p.stationsGame = GovernorPolicy.GameKey();
             if (cells.Count == 0) p.stations.Remove(key);
             else p.stations[key] = cells;
             // home_center: [x,z] (primary home map) - the killbox plan writes the base center with its stations

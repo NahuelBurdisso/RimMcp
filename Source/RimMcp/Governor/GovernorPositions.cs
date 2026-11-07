@@ -29,6 +29,7 @@ namespace RimMcp
         public static List<IntVec3> PolicyStations(Map map, GovernorPolicy pol)
         {
             List<IntVec3> l = null;
+            if (!pol.StationsForThisGame) return null;
             if (!(pol.stations.TryGetValue(map.uniqueID.ToString(), out l) && l.Count > 0) &&
                 !(map == PrimaryHome && pol.stations.TryGetValue("home", out l) && l.Count > 0)) return null;
             // stations written for another game (a killbox of the last colony) point at cells that do not
@@ -48,7 +49,8 @@ namespace RimMcp
 
         public static IntVec3 HomeCenter(Map map, GovernorPolicy pol)
         {
-            if (map == PrimaryHome && pol.homeCenter.IsValid && pol.homeCenter.InBounds(map)) return pol.homeCenter;
+            if (map == PrimaryHome && pol.homeCenter.IsValid && pol.homeCenter.InBounds(map) && pol.StationsForThisGame &&
+                (pol.stationsGame != null || OursNear(map, pol.homeCenter))) return pol.homeCenter;
             long x = 0, z = 0;
             int n = 0;
             foreach (var bed in map.listerBuildings.AllBuildingsColonistOfClass<Building_Bed>())
@@ -72,6 +74,14 @@ namespace RimMcp
                 if (near.IsValid) center = near;
             }
             return center;
+        }
+
+        // an untagged (older) homeCenter counts only with something of ours within 30 cells of it
+        static bool OursNear(Map map, IntVec3 c)
+        {
+            foreach (var b in map.listerBuildings.allBuildingsColonist)
+                if (b.Position.InHorDistOf(c, 30f)) return true;
+            return false;
         }
 
         public static bool Indoor(IntVec3 c, Map map)

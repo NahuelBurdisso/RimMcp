@@ -19,6 +19,7 @@ namespace RimMcp
         public float retreatBleedRate = 3f;            // BleedRateTotal = blood loss per day (moderate 0.3 in ~2.4 h at 3); also retreats at blood loss 0.3
         public Dictionary<string, List<IntVec3>> stations = new Dictionary<string, List<IntVec3>>();
         public IntVec3 homeCenter = IntVec3.Invalid;   // applies to the primary home map
+        public string stationsGame;                    // the game set_stations wrote stations/homeCenter for (GameKey); another game ignores them
         public float engageMeleeRadius = 5f;
         public int undraftAfterQuietTicks = 600;
         public float defendIndoorsIfRatioAbove = 2.5f;
@@ -40,6 +41,13 @@ namespace RimMcp
         public StewardPolicy steward = new StewardPolicy();
 
         public static GovernorPolicy Current = new GovernorPolicy();
+
+        // identifies one game: the world seed plus a random value the world keeps in its save
+        public static string GameKey() => Find.World?.info == null ? null : Find.World.info.seedString + ":" + Find.World.info.persistentRandomValue;
+
+        // stations and homeCenter written for another game (gauntlet 1: La Colina's homeCenter in a new colony
+        // made every distance wrong; four colonists died downed far from home) are ignored
+        public bool StationsForThisGame => stationsGame == null || stationsGame == GameKey();
         public static string LastError;
         static DateTime lastMtime = DateTime.MinValue;
 
@@ -108,6 +116,7 @@ namespace RimMcp
                 p.lastStandHealthPct = F(c, "lastStandHealthPct", p.lastStandHealthPct);
                 p.noLosTicksBeforeShift = Math.Max(120, (int)F(c, "noLosTicksBeforeShift", p.noLosTicksBeforeShift));
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
+                if (c.TryGetValue("stationsGame", out var sg) && sg is string sgs) p.stationsGame = sgs;
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
                     p.ignoreFactions = il.Where(x => x != null).Select(x => x.ToString()).ToList();
                 var st = O(c, "stations");
@@ -182,6 +191,7 @@ namespace RimMcp
             }
             sb.Append(first ? "},\n" : "\n    },\n");
             sb.Append("    \"homeCenter\": ").Append(homeCenter.IsValid ? Cell(homeCenter) : "null").Append(",\n");
+            sb.Append("    \"stationsGame\": ").Append(stationsGame == null ? "null" : Json.Write(stationsGame)).Append(",\n");
             sb.Append("    \"engageMeleeRadius\": ").Append(Num(engageMeleeRadius)).Append(",\n");
             sb.Append("    \"undraftAfterQuietTicks\": ").Append(undraftAfterQuietTicks).Append(",\n");
             sb.Append("    \"defendIndoorsIfRatioAbove\": ").Append(Num(defendIndoorsIfRatioAbove)).Append(",\n");
