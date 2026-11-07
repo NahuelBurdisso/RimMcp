@@ -50,6 +50,9 @@ namespace RimMcp
                 case "next":
                 {
                     var page = CurrentPage() ?? throw new ToolError("no setup page open");
+                    // a map-preview mod can clear the world selection after `set tile`: put it back
+                    if (page is Page_SelectStartingSite && !Find.WorldInterface.SelectedTile.Valid && Find.GameInitData.startingTile.Valid)
+                        Find.WorldInterface.SelectedTile = Find.GameInitData.startingTile;
                     if (!(bool)pageCanDoNext.Invoke(page, null))
                         throw new ToolError(page.GetType().Name + " refused to continue: " + string.Join(" | ", RecentMessages()));
                     pageDoNext.Invoke(page, null);
@@ -225,6 +228,9 @@ namespace RimMcp
                     var sb = new StringBuilder();
                     if (!TileFinder.IsValidTileForNewSettlement(tile, sb)) throw new ToolError("cannot settle there: " + sb);
                     Find.WorldInterface.SelectedTile = tile;
+                    // the page copies SelectedTile into startingTile every frame; a map-preview mod can clear the
+                    // selection before that happens ("Please select a site"): set what the page checks too
+                    Find.GameInitData.startingTile = tile;
                     Find.WorldCameraDriver.JumpTo(tile);
                     break;
                 }
