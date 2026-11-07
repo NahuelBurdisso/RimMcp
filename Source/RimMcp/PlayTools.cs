@@ -345,6 +345,12 @@ namespace RimMcp
                         o["stored"] = t.IsInAnyStorage();
                     }
                     if (t is Blueprint && t.IsForbidden(Faction.OfPlayer)) o["forbidden"] = true;
+                    if (t.def.category == ThingCategory.Building && t.def.size != IntVec2.One)
+                    {
+                        // every cell a multi-cell building covers (a bed's foot is not "something else")
+                        var occ = t.OccupiedRect();
+                        o["rect"] = new List<object> { occ.minX, occ.minZ, occ.maxX, occ.maxZ };
+                    }
                     if (t is Pawn p)
                     {
                         if (p.Faction != null) o["faction"] = p.Faction.Name;
