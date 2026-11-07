@@ -95,6 +95,15 @@ namespace RimMcp
                 r["outdoorTempC"] = (float)Math.Round(map.mapTemperature.OutdoorTemp, 1);
                 r["weather"] = map.weatherManager.curWeather?.LabelCap.ToString();
                 r["wealth"] = (float)Math.Round(map.wealthWatcher.WealthTotal);
+                // the wealth the raid curve reads, split (buildings vs floors vs items vs pawns): base scoring
+                r["wealthParts"] = new Dictionary<string, object>
+                {
+                    ["buildings"] = (float)Math.Round(map.wealthWatcher.WealthBuildings), ["floors"] = (float)Math.Round(map.wealthWatcher.WealthFloorsOnly),
+                    ["items"] = (float)Math.Round(map.wealthWatcher.WealthItems), ["pawns"] = (float)Math.Round(map.wealthWatcher.WealthPawns),
+                };
+                // the year's coldest / hottest outdoor temperature of this tile (GenTemperature, sampled like the game's world inspector)
+                r["minTempC"] = (float)Math.Round(GenTemperature.MinTemperatureAtTile(map.Tile), 1);
+                r["maxTempC"] = (float)Math.Round(GenTemperature.MaxTemperatureAtTile(map.Tile), 1);
             }
             r["maps"] = Find.Maps.Select(m => m.Parent?.LabelCap.ToString()).ToList();
             r["colonists"] = AllColonists().Count();
