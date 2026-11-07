@@ -29,6 +29,7 @@ namespace RimMcp
         public static void Reset()
         {
             lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear();
+            LastSaveDay = int.MinValue;
         }
 
         static void Did(Map map, string reflex, string what, Dictionary<string, object> more = null)
@@ -166,6 +167,46 @@ namespace RimMcp
             if (On("newColonistArea")) Areas(map, pawns);
             if (On("unforbidWeapons") && !threat) Weapons(map, pawns);
             if (On("roofValuables") && now % 15000 < 250) Valuables(map);
+            if (On("autosaveDaily") && map == GovernorPositions.PrimaryHome) DailySave(map);
+        }
+
+        // ------------------------------------------------------------------ autosaves (a player saves before a raid; not a cheat)
+
+        public static int LastSaveDay = int.MinValue;   // public: the harness rewinds it to force one
+
+        static void DailySave(Map map)
+        {
+            int day = GenDate.DaysPassed;
+            if (LastSaveDay == int.MinValue) { LastSaveDay = day; return; }   // just loaded: the next day saves, not this tick
+            if (day <= LastSaveDay) return;
+            LastSaveDay = day;
+            AutoSave(map, "auto-day-", "auto-day-" + day, "autosaveDaily");
+        }
+
+        // called by the governor right after threat_start
+        public static void PreRaidSave(Map map)
+        {
+            if (!On("autosavePreRaid")) return;
+            int ticks = Find.TickManager.TicksGame;
+            AutoSave(map, "auto-pre-raid-", $"auto-pre-raid-d{GenDate.DaysPassed}h{ticks % GenDate.TicksPerDay / GenDate.TicksPerHour:00}", "autosavePreRaid");
+        }
+
+        static void AutoSave(Map map, string prefix, string name, string reflex)
+        {
+            int keep = Math.Max(1, P.autosaveKeep);
+            LongEventHandler.QueueLongEvent(() =>
+            {
+                GameDataSaveLoader.SaveGame(name);
+                var removed = new List<object>();
+                try
+                {
+                    var dir = new System.IO.DirectoryInfo(GenFilePaths.SavedGamesFolderPath);
+                    var old = dir.GetFiles(prefix + "*" + GenFilePaths.SavedGameExtension).OrderByDescending(f => f.LastWriteTimeUtc).Skip(keep).ToList();
+                    foreach (var f in old) { f.Delete(); removed.Add(System.IO.Path.GetFileNameWithoutExtension(f.Name)); }
+                }
+                catch (Exception e) { Log.Warning("[RimMcp] autosave rotation: " + e.Message); }
+                Did(map, reflex, "saved " + name, new Dictionary<string, object> { ["save"] = name, ["rotatedOut"] = removed });
+            }, "SavingLongEvent", false, null);
         }
 
         static bool Targeted(Map map, Pawn patient, JobDef job) =>
@@ -379,13 +420,14 @@ namespace RimMcp
         {
             "rescue", "tend", "feedPatients", "clearForcedRest", "diseaseAlarm", "research", "closeRoutineWindows",
             "dismissRoutineLetters", "power", "thermostats", "newColonistArea", "unforbidWeapons", "roofValuables", "stopRun",
-            "answerNames", "forcedChoice", "refuel",
+            "answerNames", "forcedChoice", "refuel", "autosavePreRaid", "autosaveDaily",
         };
         public Dictionary<string, bool> reflexes = Reflexes.ToDictionary(r => r, r => true);
         public List<string> researchQueue = new List<string>();
         public float freezerTargetC = -10f;
         public float forcedRestFoodPct = 0.4f;
         public float feedBelowPct = 0.3f;
+        public int autosaveKeep = 5;     // auto-pre-raid-* and auto-day-* saves kept (oldest deleted first)
         // events that pause a running `run` at once (the run returns and Claude decides)
         public List<string> stopOn = new List<string> { "decision_needed", "threat_start", "colonist_died", "colonist_downed", "mental_break", "fire_in_home", "quest_offer" };
 
