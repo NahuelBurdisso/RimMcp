@@ -39,6 +39,7 @@ namespace RimMcp
         public IntVec3 enemyFront = IntVec3.Invalid;   // the threat nearest to home: what positions face
         public bool closeCombat;                       // an enemy within 12 cells of our line: hold, no re-planning
         public bool farHold;                           // enemies beyond engageDistance: nobody drafted yet
+        public bool skirmishSent;                      // colonists near a far enemy were sent at it (event once)
         public float rangePull = 0.1f, planRangePull = 0.1f;
         public readonly Dictionary<Pawn, int> outOfRangeTicks = new Dictionary<Pawn, int>();
         public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent;
@@ -71,7 +72,7 @@ namespace RimMcp
             lastOrderTick.Clear(); lastJobId.Clear(); ourJobs.Clear(); weapons.Clear(); badCells.Clear();
             startDowned.Clear(); ourDowned.Clear(); startColonists.Clear(); warnedNoBed.Clear();
             shelterCells = null; forbiddenSnapshot = null;
-            overwhelmed = planOverwhelmed = decisionSent = noFightersSent = false;
+            overwhelmed = planOverwhelmed = decisionSent = noFightersSent = skirmishSent = false;
             firstDeployTick = -1; lastPlanTick = -100000; planMode = null;
             enemyCentroid = planCentroid = enemyFront = IntVec3.Invalid;
             closeCombat = false; rangePull = planRangePull = 0.1f; outOfRangeTicks.Clear();
@@ -257,6 +258,17 @@ namespace RimMcp
                 st.threats.Add(p);
             }
             tmpTargets.Clear();
+            // a wild predator hunting a colonist is not in the colony's attack-target cache until it
+            // has bitten someone (run15: the cougar was seen only when Tomas was already down)
+            var wild = map.mapPawns.AllPawnsSpawned;
+            for (int i = 0; i < wild.Count; i++)
+            {
+                var p = wild[i];
+                if (p.Faction != null || p.Dead || p.Downed || !p.RaceProps.predator || st.threats.Contains(p) || p.Fogged()) continue;
+                var job = p.CurJob;
+                if (job == null || job.def != JobDefOf.PredatorHunt || !(job.targetA.Thing is Pawn prey) || prey.Faction != Faction.OfPlayer) continue;
+                st.threats.Add(p);
+            }
             if (st.active) DetectOverrides(st);
             if (st.threats.Count == 0) return;
             st.lastThreatTick = Find.TickManager.TicksGame;
@@ -582,6 +594,7 @@ namespace RimMcp
                 st.farHold = false;
                 if (pol.autoDraft && ranged.Count + melee.Count > 0) Deploy(st, pol, ranged, melee);
             }
+            if (far) Skirmish(st, pol, ranged, melee, nonCombat);
             if (pol.shelter && !far) Shelter(st, nonCombat);
             if (pol.rescueDowned) RescueDowned(st, pol, true);
         }
@@ -673,6 +686,44 @@ namespace RimMcp
 
         // Vanilla's drafted auto-attack swings the gun butt at an adjacent enemy. A shot at point
         // blank does more: order the shooter to fire at it (as a player's attack click would).
+        // far from home is not far from everyone: in run15 a cougar hunted Tomas 90 cells out while the
+        // far hold kept the whole colony working, and he died alone. Colonists within skirmishRadius of
+        // an enemy fight it (ranged shoot, melee charge); unarmed ones there run home; the rest keep working.
+        void Skirmish(GovMapState st, GovernorPolicy pol, List<Pawn> ranged, List<Pawn> melee, List<Pawn> nonCombat)
+        {
+            if (pol.skirmishRadius <= 0f || st.threats.Count == 0 || !pol.autoDraft) return;
+            float r2 = pol.skirmishRadius * pol.skirmishRadius;
+            Pawn Near(Pawn p) => st.threats.Where(e => e.Spawned && !e.Downed && (e.Position - p.Position).LengthHorizontalSquared <= r2)
+                .OrderBy(e => (e.Position - p.Position).LengthHorizontalSquared).FirstOrDefault();
+            int t = Find.TickManager.TicksGame;
+            var fighters = new List<object>();
+            foreach (var p in ranged.Concat(melee))
+            {
+                var e = Near(p);
+                if (e == null) continue;
+                var job = p.CurJob;
+                if (p.Drafted && job != null && (job.def == JobDefOf.AttackStatic || job.def == JobDefOf.AttackMelee) && job.targetA.Thing == e) continue;
+                if (st.lastOrderTick.TryGetValue(p, out var lt) && t - lt < 120 && p.Drafted) continue;
+                Draft(st, p);
+                bool meleeRole = melee.Contains(p) || !IsRanged(p);
+                var attack = JobMaker.MakeJob(meleeRole ? JobDefOf.AttackMelee : JobDefOf.AttackStatic, e);
+                if (!meleeRole) attack.endIfCantShootTargetFromCurPos = false;
+                attack.killIncappedTarget = false;
+                if (Order(st, p, attack)) fighters.Add(p.LabelShort);
+            }
+            var runners = nonCombat.Where(p => Near(p) != null).ToList();
+            if (runners.Count > 0 && pol.shelter) Shelter(st, runners);
+            if (fighters.Count > 0 && !st.skirmishSent)
+            {
+                st.skirmishSent = true;
+                GovernorEvents.Emit("skirmish", st.map, new Dictionary<string, object>
+                {
+                    ["fighters"] = fighters, ["enemy"] = st.threats.Select(e => (object)e.KindLabel).Distinct().ToList(),
+                    ["runners"] = runners.Select(p => (object)p.LabelShort).ToList(),
+                });
+            }
+        }
+
         void PointBlank(GovMapState st)
         {
             foreach (var kv in st.assign)

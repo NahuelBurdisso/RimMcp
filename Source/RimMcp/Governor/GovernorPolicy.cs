@@ -23,6 +23,7 @@ namespace RimMcp
         public int undraftAfterQuietTicks = 600;
         public float defendIndoorsIfRatioAbove = 2.5f;
         public float engageDistance = 45f;             // deploy only when an enemy is this close to home (0 = always)
+        public float skirmishRadius = 20f;             // ...or this close to a colonist out there: the ones near it fight back (0 = off)
         public List<string> ignoreFactions = new List<string>();
         // rescue
         public bool rescueDowned = true;
@@ -95,6 +96,7 @@ namespace RimMcp
                 p.undraftAfterQuietTicks = (int)F(c, "undraftAfterQuietTicks", p.undraftAfterQuietTicks);
                 p.defendIndoorsIfRatioAbove = F(c, "defendIndoorsIfRatioAbove", p.defendIndoorsIfRatioAbove);
                 p.engageDistance = F(c, "engageDistance", p.engageDistance);
+                p.skirmishRadius = F(c, "skirmishRadius", p.skirmishRadius);
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
                     p.ignoreFactions = il.Where(x => x != null).Select(x => x.ToString()).ToList();

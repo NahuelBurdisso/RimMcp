@@ -55,6 +55,12 @@ namespace RimMcp
             lastFrame = UnityEngine.Time.realtimeSinceStartup;
             foreach (var w in Find.WindowStack.Windows.ToList())
             {
+                if (w is Dialog_GiveName gn)
+                {
+                    // faction / settlement / pet names pause the game; a closed one comes back (run15 looped 440 times)
+                    if (On("answerNames")) AnswerName(gn);
+                    continue;
+                }
                 string text = null;
                 if (w is Dialog_NodeTree nt && curNodeField?.GetValue(nt) is DiaNode node) text = node.text.Resolve()?.StripTags();
                 else if (w is Dialog_MessageBox mb) text = mb.text.Resolve()?.StripTags();
@@ -66,6 +72,30 @@ namespace RimMcp
                 w.Close();
                 Did(null, "closeRoutineWindows", "closed: " + text.Split('\n')[0]);
             }
+        }
+
+        const BindingFlags Inst = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        // the player's answer when nothing better comes to mind: the name the dialog suggests
+        public static string AnswerName(Dialog_GiveName gn)
+        {
+            var t = gn.GetType();
+            object F(string f) => t.GetField(f, Inst)?.GetValue(gn);
+            var first = (F("curName") as string)?.Trim();
+            bool useSecond = F("useSecondName") is bool b && b;
+            var second = (F("curSecondName") as string)?.Trim();
+            bool Valid(string m, string v) => !string.IsNullOrEmpty(v) && (bool)t.GetMethod(m, Inst).Invoke(gn, new object[] { v });
+            if (!Valid("IsValidName", first) || useSecond && !Valid("IsValidSecondName", second))
+            {
+                if (flagged.Add(-2)) Attention(null, "answerNames", $"{t.Name}: suggested name '{first}' is not valid, answer it with choose option=name");
+                return null;
+            }
+            t.GetMethod("Named", Inst).Invoke(gn, new object[] { first });
+            if (useSecond) t.GetMethod("NamedSecond", Inst).Invoke(gn, new object[] { second });
+            Find.WindowStack.TryRemove(gn);
+            var what = $"{t.Name.Replace("Dialog_", "")}: named {first}" + (useSecond ? " / " + second : "");
+            Did(null, "answerNames", what);
+            return what;
         }
 
         // ------------------------------------------------------------------ ticks
@@ -291,6 +321,7 @@ namespace RimMcp
         {
             "rescue", "tend", "feedPatients", "clearForcedRest", "diseaseAlarm", "research", "closeRoutineWindows",
             "dismissRoutineLetters", "power", "thermostats", "newColonistArea", "unforbidWeapons", "roofValuables", "stopRun",
+            "answerNames",
         };
         public Dictionary<string, bool> reflexes = Reflexes.ToDictionary(r => r, r => true);
         public List<string> researchQueue = new List<string>();
