@@ -49,6 +49,7 @@ namespace RimMcp
                 ["gizmos"] = Gizmos,
                 ["governor"] = GovernorTool,
                 ["plan"] = PlanTool,
+                ["reach"] = Reach,
             };
             foreach (var kv in more) handlers[kv.Key] = kv.Value;
         }
@@ -230,6 +231,7 @@ namespace RimMcp
 
         static object MapView(Dictionary<string, object> a)
         {
+            if (Bool(a, "summary", false)) return MapSummary(a);
             var map = CurMap();
             int step = Math.Max(1, Int(a, "step", 1));
             CellRect rect;
@@ -459,7 +461,8 @@ namespace RimMcp
             var cats = new Dictionary<string, int>();
             foreach (var d in defs)
             {
-                if (!new Designator_Build(d).Visible) continue;
+                bool visible = new Designator_Build(d).Visible;
+                if (!visible && !Bool(a, "all", false)) continue;   // all: facts of locked defs too (layout planning)
                 cats[d.designationCategory.defName] = cats.TryGetValue(d.designationCategory.defName, out var n) ? n + 1 : 1;
                 if (cat == null && q == null) continue;
                 var o = new Dictionary<string, object>
@@ -467,13 +470,29 @@ namespace RimMcp
                     ["def"] = d.defName, ["label"] = d.label, ["category"] = d.designationCategory.defName,
                     ["cost"] = CostText(d, null),
                 };
+                if (!visible) o["available"] = false;
                 if (d is ThingDef td)
                 {
                     if (td.size != IntVec2.One) o["size"] = new List<object> { td.size.x, td.size.z };
                     if (td.MadeFromStuff) o["stuff"] = GenStuff.AllowedStuffsFor(td).Where(s => map.resourceCounter.GetCount(s) > 0).Select(s => (object)s.defName).ToList();
                     if (td.rotatable) o["rotatable"] = true;
                     if (td.hasInteractionCell) o["interactionCell"] = new List<object> { td.interactionCellOffset.x, td.interactionCellOffset.z };
+                    // facts the layout validator needs, straight from the def (no memory of older versions)
+                    var glow = td.GetCompProperties<CompProperties_Glower>();
+                    if (glow != null) o["glowRadius"] = glow.glowRadius;
+                    var heat = td.GetCompProperties<CompProperties_HeatPusher>();
+                    if (heat != null && heat.heatPerSecond > 0) o["heatPerSecond"] = heat.heatPerSecond;
+                    var fuel = td.GetCompProperties<CompProperties_Refuelable>();
+                    if (fuel != null) o["fuel"] = string.Join("/", fuel.fuelFilter?.AllowedThingDefs.Take(4).Select(f => f.defName) ?? Enumerable.Empty<string>());
+                    var pw = td.GetCompProperties<CompProperties_Power>();
+                    if (pw != null) o["powerW"] = -pw.PowerConsumption;
+                    if (td.IsBed) o["bed"] = true;
+                    if (td.passability == Traversability.Impassable) o["impassable"] = true;
+                    if (td.holdsRoof) o["holdsRoof"] = true;
                 }
+                if (d.constructionSkillPrerequisite > 0) o["constructionSkill"] = d.constructionSkillPrerequisite;
+                if (d.artisticSkillPrerequisite > 0) o["artisticSkill"] = d.artisticSkillPrerequisite;
+                if (d.researchPrerequisites != null && d.researchPrerequisites.Count > 0) o["research"] = d.researchPrerequisites.Select(x => (object)x.defName).ToList();
                 res.Add(o);
             }
             if (cat == null && q == null)
@@ -522,9 +541,18 @@ namespace RimMcp
             IEnumerable<IntVec3> cells;
             if (size != IntVec2.One) cells = new[] { rect.Min };   // one multi-cell building at x,z (its center for odd sizes)
             else cells = outline ? rect.EdgeCells : rect.Cells;
+            // dry: ask the game whether each placement would be accepted, place nothing
+            bool dry = Bool(a, "dry", false);
+            var dryRejected = new List<object>();
             foreach (var c in cells.ToList())
             {
                 var rep = des.CanDesignateCell(c);
+                if (dry)
+                {
+                    if (rep.Accepted) placed.Add(Pos(c));
+                    else { AddReason(reasons, rep); if (dryRejected.Count < 40) dryRejected.Add(new List<object> { c.x, c.z, Clean(rep.Reason) }); }
+                    continue;
+                }
                 if (rep.Accepted)
                 {
                     des.DesignateSingleCell(c);
@@ -538,7 +566,14 @@ namespace RimMcp
                 ["def"] = def.defName, ["stuff"] = des.StuffDef?.defName, ["rot"] = des.Rot.ToStringHuman(),
                 ["placed"] = placed.Count, ["costEach"] = CostText(def, des.StuffDef),
             };
-            if (planned) r["planned"] = "forbidden blueprints: nobody builds them until plan action=approve";
+            if (dry)
+            {
+                r["dry"] = true;
+                if (dryRejected.Count > 0) r["rejectedCells"] = dryRejected;
+                if (def is ThingDef idef && idef.hasInteractionCell && size != IntVec2.One)
+                    r["interactionCell"] = Pos(ThingUtility.InteractionCellWhenAt(idef, rect.Min, des.Rot, map));
+            }
+            else if (planned) r["planned"] = "forbidden blueprints: nobody builds them until plan action=approve";
             if (size != IntVec2.One)
             {
                 r["note"] = $"multi-cell ({size.x}x{size.z}); x,z is the building's center cell" +
@@ -1229,6 +1264,27 @@ namespace RimMcp
                 ["thing"] = flick.parent.LabelCap.ToString(), ["switchIsOn"] = flick.SwitchIsOn, ["wantOn"] = on,
                 ["note"] = flick.SwitchIsOn == on ? "already in that state" : "a colonist will go and flick it",
             };
+        }
+
+        // Can a colonist walk from each cell to `to`? (doors passable, like a pawn's path; read-only)
+        static object Reach(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var to = new IntVec3(Int(a, "to_x"), 0, Int(a, "to_z"));
+            if (!(a.TryGetValue("cells", out var cv) && cv is List<object> cl)) throw new ToolError("cells: [[x,z],...]");
+            var parms = TraverseParms.For(TraverseMode.PassDoors);
+            var no = new List<object>();
+            int yes = 0;
+            foreach (var o in cl)
+            {
+                var l = o as List<object>;
+                if (l == null || l.Count < 2) continue;
+                var c = new IntVec3(Convert.ToInt32(l[0]), 0, Convert.ToInt32(l[1]));
+                if (!c.InBounds(map)) { no.Add(Pos(c)); continue; }
+                if (map.reachability.CanReach(c, to, PathEndMode.Touch, parms)) yes++;
+                else no.Add(Pos(c));
+            }
+            return new Dictionary<string, object> { ["to"] = Pos(to), ["reachable"] = yes, ["unreachable"] = no };
         }
 
         static object Power(Dictionary<string, object> a)

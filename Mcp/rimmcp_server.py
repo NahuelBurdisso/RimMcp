@@ -95,7 +95,9 @@ TOOLS += [
                     "plan (planned walls/doors/objects/floors and vanilla plans). Unexplored cells show as '?'.",
      "inputSchema": obj({**RECT, "step": {"type": "integer", "default": 1},
                          "layers": {"type": "array", "items": {"type": "string", "enum": ["main", "roof", "fertility", "build", "plan"]}},
-                         "objects": {"type": "boolean"}, "maxObjects": {"type": "integer"}})},
+                         "objects": {"type": "boolean"}, "maxObjects": {"type": "integer"},
+                         "summary": {"type": "boolean", "description": "true: no grid; clusters with bbox, cells and largest inner rect: mountains, heavyGround, mountainEdge, richSoil, soil, movingWater, stillWater, mudMarsh, ruins, resources (veins, ship chunks, geysers), colony footprint"},
+                         "max": {"type": "integer", "description": "summary: clusters per kind (default 8)"}})},
     {"name": "things", "read": True,
      "description": "Find things on the map: by query (defName or label part), kind (item, building, plant, pawn, "
                     "animal, hostile, blueprint) and optional rectangle. Gives id, position, forbidden/stored, growth.",
@@ -117,7 +119,8 @@ TOOLS += [
                     "planned=true: forbidden blueprints nobody builds until plan action=approve (default: on while "
                     "Plan On The Fly's toggle is on).",
      "inputSchema": obj({"def": {"type": "string"}, **RECT, "rot": {"type": "string"}, "stuff": {"type": "string"},
-                         "outline": {"type": "boolean"}, "planned": {"type": "boolean"}}, ["def", "x", "z"])},
+                         "outline": {"type": "boolean"}, "planned": {"type": "boolean"},
+                         "dry": {"type": "boolean", "description": "true: place nothing; say which cells the game would accept or reject and why (+ occupies, interactionCell)"}}, ["def", "x", "z"])},
     {"name": "zones", "read": True,
      "description": "All zones (growing with plant, stockpiles with priority, bounds) and areas (home, roof, allowed).",
      "inputSchema": obj({})},
@@ -282,6 +285,31 @@ TOOLS.append(
                          **RECT, "type": {"type": "string", "enum": ["wall", "door", "object", "floor", "area"]},
                          "color": {"type": "string"}, "outline": {"type": "boolean"}, "name": {"type": "string"},
                          "on": {"type": "boolean"}, "all": {"type": "boolean"}, "query": {"type": "string"}})})
+TOOLS.append(
+    {"name": "batch", "read": False,
+     "description": "Several tool calls in one request, run in order on the game's main thread in the same frame "
+                    "(a whole room: walls, door, bed, lamp, floor in one trip). calls = [{tool, args}, ...]; "
+                    "stop_on_error stops at the first failure; quiet=true returns only failed or rejected calls. "
+                    "Result: ok/failed/skipped counts + per call {i, tool, ok, result | error}. Not allowed inside: "
+                    "batch, newgame, run.",
+     "inputSchema": obj({"calls": {"type": "array", "items": {"type": "object", "properties": {
+                             "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["tool"]}},
+                         "stop_on_error": {"type": "boolean"}, "quiet": {"type": "boolean"}}, ["calls"])})
+TOOLS.append(
+    {"name": "reach", "read": True,
+     "description": "Can a colonist walk from each of cells to to_x,to_z (doors passable, as pawns path)? Returns the "
+                    "reachable count and the unreachable cells. Use it after closing a wall: every stockpile, bench "
+                    "and bed must still reach the entrance.",
+     "inputSchema": obj({"cells": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+                         "to_x": {"type": "integer"}, "to_z": {"type": "integer"}}, ["cells", "to_x", "to_z"])})
+TOOLS.append(
+    {"name": "snapshot", "read": True,
+     "description": "The whole colony in one compact read: date/weather/wealth line, one line per colonist (mood/break, "
+                    "hp, position, DOWNED/BLEEDING/FORCED/inBed/food flags, job, diseases with severity vs immunity), key "
+                    "stock, food days, forbidden loose items, alert labels, open windows, letters, quest offers, current "
+                    "research, threats with hostile positions (governor ignoreFactions left out) and the event cursor. "
+                    "Empty sections are omitted. Start every decision here instead of status+colonists+resources+alerts+dialogs+threats.",
+     "inputSchema": obj({"ignoreFactions": {"type": "array", "items": {"type": "string"}}})})
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 
@@ -340,8 +368,26 @@ def endpoint():
     raise GameDown("RimWorld is not running with the RimMcp mod active (no endpoint answered).")
 
 
+CALLS = {"http": 0}   # bridge round trips made by this process (bench and tools read it)
+
+
+def count_call(tool, n=1):
+    """Count one bridge round trip; RIMMCP_COUNT_FILE (bench) also gets one line per trip,
+    so calls made by child processes (rmc, place.py) add up in one place."""
+    CALLS["http"] += 1
+    CALLS[tool] = CALLS.get(tool, 0) + n
+    path = os.environ.get("RIMMCP_COUNT_FILE")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"{tool} {n}\n")
+        except OSError:
+            pass
+
+
 def call_game(tool, args):
     global _endpoint
+    count_call(tool, len(args.get("calls") or []) if tool == "batch" else 1)
     for attempt in (1, 2):
         ep = endpoint()
         try:
@@ -353,26 +399,25 @@ def call_game(tool, args):
 
 
 def run_and_wait(args):
-    """run: unpause in the game, then poll until it pauses again (or wait_seconds pass)."""
+    """run: unpause in the game, then block on /wait until it pauses again (or wait_seconds pass).
+    Three round trips: run, wait, one batch of status+dialogs+alerts."""
     wait = float(args.pop("wait_seconds", 60) or 60)
     reply = call_game("run", args)
     if not reply.get("ok"):
         return reply
-    t0 = time.time()
-    status = None
-    while time.time() - t0 < wait:
-        time.sleep(1.0)
-        st = call_game("status", {})
-        if st.get("ok") and st["result"].get("paused"):
-            status = st["result"]
-            break
     stopped = None
-    if status is None:
+    try:
+        count_call("wait")
+        w = http(endpoint(), "GET", f"/wait?seconds={wait:.0f}", timeout=wait + 15)
+        paused = (w.get("result") or {}).get("paused")
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        paused = False
+    if not paused:
         call_game("set_speed", {"speed": "pause"})
-        status = call_game("status", {}).get("result")
         stopped = f"still running after {wait:.0f}s real time; paused it"
-    dialogs = call_game("dialogs", {}).get("result") or {}
-    alerts = call_game("alerts", {}).get("result") or {}
+    b = call_game("batch", {"calls": [{"tool": "status"}, {"tool": "dialogs"}, {"tool": "alerts"}]})
+    res = [e.get("result") or {} for e in (b.get("result") or {}).get("results", [])] + [{}, {}, {}]
+    status, dialogs, alerts = res[0], res[1], res[2]
     return {"ok": True, "result": {
         "stoppedBecause": stopped or dialogs.get("lastAutoPause") or "paused",
         "status": status,
@@ -386,6 +431,8 @@ def run_and_wait(args):
 def run_tool(name, args):
     if name not in TOOL_NAMES:
         return f"unknown tool {name}", True
+    if name == "batch" and any((c or {}).get("tool") == "run" for c in (args or {}).get("calls") or []):
+        return "run cannot go inside a batch (it waits for the game to pause): call it on its own", True
     try:
         reply = run_and_wait(dict(args or {})) if name == "run" else call_game(name, args or {})
     except GameDown as e:
@@ -397,6 +444,8 @@ def run_tool(name, args):
     result = reply.get("result")
     if name == "status":
         result = {"running": True, **(result or {})}
+    if name in ("batch", "snapshot") or (args or {}).get("summary"):
+        return json.dumps(result, ensure_ascii=False, separators=(",", ":")), False
     return json.dumps(result, ensure_ascii=False, indent=1), False
 
 

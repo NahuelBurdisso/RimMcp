@@ -116,6 +116,22 @@ namespace RimMcp
                 {
                     body = new Dictionary<string, object> { ["ok"] = true, ["version"] = "1" };
                 }
+                else if (ctx.Request.HttpMethod == "GET" && ctx.Request.Url.AbsolutePath == "/wait")
+                {
+                    // block on this listener thread (not the main thread) until the game pauses or
+                    // the time is up: a run costs one round trip instead of one status poll per second
+                    double secs = 60;
+                    double.TryParse(ctx.Request.QueryString["seconds"], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out secs);
+                    var sw = Stopwatch.StartNew();
+                    bool paused = false;
+                    while (sw.Elapsed.TotalSeconds < Math.Min(Math.Max(secs, 0.5), 600))
+                    {
+                        if (IsPaused()) { paused = true; break; }
+                        Thread.Sleep(250);
+                    }
+                    body = new Dictionary<string, object> { ["ok"] = true, ["result"] = new Dictionary<string, object> { ["paused"] = paused, ["seconds"] = Math.Round(sw.Elapsed.TotalSeconds, 1) } };
+                }
                 else if (ctx.Request.HttpMethod == "POST" && ctx.Request.Url.AbsolutePath == "/call")
                 {
                     string text;
@@ -145,6 +161,17 @@ namespace RimMcp
                 ctx.Response.Close();
             }
             catch { }
+        }
+
+        // read from the listener thread; a stale value only costs one more 250 ms loop
+        static bool IsPaused()
+        {
+            try
+            {
+                var tm = Current.Game?.tickManager;
+                return tm == null || tm.Paused || Current.ProgramState != ProgramState.Playing;
+            }
+            catch { return false; }
         }
 
         static object RunOnMainThread(string tool, Dictionary<string, object> args)

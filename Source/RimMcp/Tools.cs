@@ -25,6 +25,8 @@ namespace RimMcp
                 ["set_work_priority"] = SetWorkPriority,
                 ["message"] = ShowMessage,
                 ["focus"] = Focus,
+                ["batch"] = Batch,
+                ["snapshot"] = Snapshot,
             };
 
         public static object Run(string tool, Dictionary<string, object> args)
