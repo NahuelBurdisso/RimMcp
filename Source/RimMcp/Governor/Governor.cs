@@ -47,6 +47,7 @@ namespace RimMcp
         // nobody is in contact for EngageReleaseTicks; only one-cell shifts (fire, flank, no line of fire).
         public bool engaged;
         public Pawn focusTarget;
+        public readonly HashSet<Pawn> lastStand = new HashSet<Pawn>();
         public int lastContactTick = -100000, shifts;
         public readonly Dictionary<Pawn, int> lastShiftTick = new Dictionary<Pawn, int>();
         public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent, manualHoldSent;
@@ -83,7 +84,7 @@ namespace RimMcp
             firstDeployTick = -1; lastPlanTick = -100000; planMode = null;
             enemyCentroid = planCentroid = enemyFront = IntVec3.Invalid;
             closeCombat = false; rangePull = planRangePull = 0.1f; outOfRangeTicks.Clear();
-            engaged = false; focusTarget = null; lastContactTick = -100000; shifts = 0; lastShiftTick.Clear();
+            engaged = false; focusTarget = null; lastStand.Clear(); lastContactTick = -100000; shifts = 0; lastShiftTick.Clear();
             rescuedCount = capturedCount = 0;
         }
     }
@@ -446,6 +447,13 @@ namespace RimMcp
         // Blood loss grows by BleedRateTotal per day (HediffGiver_Bleeding: +rate*0.001 every 60 ticks), moderate
         // at 0.30, severe 0.45. One revolver wound bleeds ~1.4/day (+0.06 an hour): the old 0.5 threshold sent
         // every shooter to bed at the first hit (harness D: 3 colonists retreated from one raider and lost).
+        static readonly List<Pawn> holdCands = new List<Pawn>();
+
+        // below retreatHealthPct but not bleeding past retreatBleedRate and without moderate blood loss
+        static bool HealthOnly(Pawn p, GovernorPolicy pol) =>
+            p.health.hediffSet.BleedRateTotal < pol.retreatBleedRate &&
+            (p.health.hediffSet.GetFirstHediffOfDef(HediffDefOf.BloodLoss)?.Severity ?? 0f) < 0.3f;
+
         static bool NeedsRetreat(Pawn p, GovernorPolicy pol) =>
             p.health.summaryHealth.SummaryHealthPercent < pol.retreatHealthPct ||
             p.health.hediffSet.BleedRateTotal >= pol.retreatBleedRate ||
@@ -573,11 +581,45 @@ namespace RimMcp
                 }
                 if (NeedsRetreat(p, pol))
                 {
-                    if (Drafted.Contains(p) || st.assign.ContainsKey(p)) StartRetreat(st, p);
+                    if (Drafted.Contains(p) || st.assign.ContainsKey(p))
+                    {
+                        if (HealthOnly(p, pol) && st.engaged && p.health.summaryHealth.SummaryHealthPercent >= pol.lastStandHealthPct)
+                        { holdCands.Add(p); (MeleeRole(p) ? melee : ranged).Add(p); continue; }
+                        StartRetreat(st, p);
+                    }
                     else nonCombat.Add(p); // already wounded before deploying: keep out of it
                     continue;
                 }
                 (MeleeRole(p) ? melee : ranged).Add(p);
+            }
+            // last stand (harness A, sprint 4: three shooters left the sandbags one by one at 50 % health and the
+            // raiders walked in on the beds): a shooter below retreatHealthPct only for health (not bleeding, no
+            // blood loss) stays on the line while leaving would make the fight hopeless (enemy power over
+            // defendIndoorsIfRatioAbove x what stays), down to lastStandHealthPct. Worst first leaves first.
+            if (holdCands.Count > 0)
+            {
+                float enemy = st.threats.Sum(PowerOf);
+                foreach (var p in holdCands.OrderBy(x => x.health.summaryHealth.SummaryHealthPercent))
+                {
+                    float without = ranged.Concat(melee).Where(x => x != p).Sum(PowerOf);
+                    // a melee attacker on top of him follows him to bed and kills him lying down (harness B run 5:
+                    // Pan retreated from a wolf at 46 % and died in bed): he fights back where he stands
+                    bool pinned = st.threats.Any(e => e.Spawned && !e.Downed && !IsRanged(e) && GovernorPositions.Cheb(e.Position, p.Position) <= 2);
+                    if (!pinned && enemy / Mathf.Max(1f, without) <= pol.defendIndoorsIfRatioAbove)
+                    {
+                        ranged.Remove(p); melee.Remove(p);
+                        StartRetreat(st, p);
+                        continue;
+                    }
+                    if (st.lastStand.Add(p))
+                        GovernorEvents.Emit("last_stand", map, new Dictionary<string, object>
+                        {
+                            ["pawn"] = p.LabelShort, ["healthPct"] = (float)Math.Round(p.health.summaryHealth.SummaryHealthPercent * 100f, 1),
+                            ["enemyPower"] = Mathf.Round(enemy), ["oursWithout"] = Mathf.Round(without),
+                            ["holdsUntilPct"] = pol.lastStandHealthPct * 100f, ["pinnedByMelee"] = pinned,
+                        });
+                }
+                holdCands.Clear();
             }
 
             st.ourPower = ranged.Sum(PowerOf) + melee.Sum(PowerOf);

@@ -76,7 +76,11 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
   `focusFire` (default on, while engaged): every shooter on station that can hit it is ordered to
   attack the same enemy (most of our shooters have a shot at it, then the most hurt, then the
   nearest; never one next to a colonist) until it drops; a shot being aimed is never broken.
-- **Retreat** below `retreatHealthPct` or above `retreatBleedRate`: undraft, go to bed.
+- **Retreat** below `retreatHealthPct` or above `retreatBleedRate`: undraft, go to bed. **Last stand**
+  (engaged, health is the only reason): a fighter whose leaving would put the enemy over
+  `defendIndoorsIfRatioAbove` x what stays holds the line down to `lastStandHealthPct` (0.35;
+  `last_stand` event), and so does one with a melee attacker within 2 cells (it would follow him to
+  bed); bleeding past `retreatBleedRate` or moderate blood loss always retreats.
   **Shelter**: non-combatants outdoors go to a roofed room. **Rescue** downed colonists when no
   enemy is within 10 cells. **Overwhelming** enemy (`defendIndoorsIfRatioAbove`; both sides
   rated the same way: people by weapon, animals and mechs by kind): fall back next to the main
@@ -103,7 +107,7 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
             "stations": {"home": [[120, 98], [122, 98]]}, "homeCenter": null,
             "engageMeleeRadius": 5, "undraftAfterQuietTicks": 600,
             "defendIndoorsIfRatioAbove": 2.5, "engageDistance": 45, "skirmishRadius": 20,
-            "manualReleaseTicks": 1000, "freezeWhenEngaged": true, "noLosTicksBeforeShift": 360, "focusFire": true,
+            "manualReleaseTicks": 1000, "freezeWhenEngaged": true, "noLosTicksBeforeShift": 360, "focusFire": true, "lastStandHealthPct": 0.35,
             "ignoreFactions": []},
  "rescue": {"downedColonists": true, "captureDowned": true},
  "nonCombatants": {"shelter": true},
@@ -112,7 +116,7 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
 
 - Events `<save data folder>/RimMcp/events.jsonl` (rotated to `events.1.jsonl`), one JSON
   object per line with `seq`, tick, date, hour, map, `type`: governor_active, threat_start,
-  governor_deploy, governor_hold, governor_release, governor_shift, retreat, rescued, captured, player_override, manual_hold, manual_released,
+  governor_deploy, governor_hold, governor_release, governor_shift, last_stand, retreat, rescued, captured, player_override, manual_hold, manual_released,
   decision_needed, threat_end,
   colonist_downed, colonist_died, mental_break, letter_received, quest_offer, alert_new,
   alert_cleared, fire_in_home, fire_out, governor_error. Read them with

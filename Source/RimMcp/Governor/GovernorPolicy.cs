@@ -27,6 +27,7 @@ namespace RimMcp
         public float skirmishRadius = 20f;             // ...or this close to a colonist out there: the ones near it fight back (0 = off)
         public bool freezeWhenEngaged = true;          // enemy in weapon range (or within 12 of the line): stations stay put, only 1-cell shifts
         public int noLosTicksBeforeShift = 360;        // frozen: a shooter this long without a shot at anyone in range steps to an adjacent cell with one
+        public float lastStandHealthPct = 0.35f;       // engaged, health-only retreat that would leave the line hopeless: hold down to this
         public bool focusFire = true;                  // engaged: shooters on station shoot the same enemy (attack order) until it drops
         public List<string> ignoreFactions = new List<string>();
         // rescue
@@ -104,6 +105,7 @@ namespace RimMcp
                 p.manualReleaseTicks = (int)F(c, "manualReleaseTicks", p.manualReleaseTicks);
                 p.freezeWhenEngaged = B(c, "freezeWhenEngaged", p.freezeWhenEngaged);
                 p.focusFire = B(c, "focusFire", p.focusFire);
+                p.lastStandHealthPct = F(c, "lastStandHealthPct", p.lastStandHealthPct);
                 p.noLosTicksBeforeShift = Math.Max(120, (int)F(c, "noLosTicksBeforeShift", p.noLosTicksBeforeShift));
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
@@ -188,6 +190,7 @@ namespace RimMcp
             sb.Append("    \"manualReleaseTicks\": ").Append(manualReleaseTicks).Append(",\n");
             sb.Append("    \"freezeWhenEngaged\": ").Append(freezeWhenEngaged ? "true" : "false").Append(",\n");
             sb.Append("    \"noLosTicksBeforeShift\": ").Append(noLosTicksBeforeShift).Append(",\n");
+            sb.Append("    \"lastStandHealthPct\": ").Append(Num(lastStandHealthPct)).Append(",\n");
             sb.Append("    \"focusFire\": ").Append(focusFire ? "true" : "false").Append(",\n");
             sb.Append("    \"ignoreFactions\": ").Append(Json.Write(ignoreFactions)).Append("\n");
             sb.Append("  },\n");
