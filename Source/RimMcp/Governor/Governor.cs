@@ -38,6 +38,7 @@ namespace RimMcp
         public float enemyPower, ourPower;
         public IntVec3 enemyFront = IntVec3.Invalid;   // the threat nearest to home: what positions face
         public bool closeCombat;                       // an enemy within 12 cells of our line: hold, no re-planning
+        public bool farHold;                           // enemies beyond engageDistance: nobody drafted yet
         public float rangePull = 0.1f, planRangePull = 0.1f;
         public readonly Dictionary<Pawn, int> outOfRangeTicks = new Dictionary<Pawn, int>();
         public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent;
@@ -557,8 +558,31 @@ namespace RimMcp
                 });
             }
 
-            if (pol.autoDraft && ranged.Count + melee.Count > 0) Deploy(st, pol, ranged, melee);
-            if (pol.shelter) Shelter(st, nonCombat);
+            // a lone drifter wandering at the map edge kept every colonist drafted for hours (no work, no
+            // cleaning): while the nearest enemy is farther than engageDistance from home and we are not
+            // outnumbered, nobody is drafted; deployment starts when it comes closer
+            float nearestHome = st.threats.Count > 0 ? st.threats.Min(p => (p.Position - st.home).LengthHorizontal) : 0f;
+            bool far = pol.engageDistance > 0 && nearestHome > pol.engageDistance && !st.overwhelmed;
+            if (far)
+            {
+                if (!st.farHold)
+                {
+                    st.farHold = true;
+                    var released = Drafted.Where(p => p.Map == map && p.Drafted && !Manual.Contains(p)).ToList();
+                    foreach (var p in released) { p.drafter.Drafted = false; Drafted.Remove(p); st.assign.Remove(p); }
+                    GovernorEvents.Emit("threat_far", map, new Dictionary<string, object>
+                    {
+                        ["nearest"] = Mathf.Round(nearestHome), ["engageDistance"] = pol.engageDistance,
+                        ["released"] = released.Select(p => (object)p.LabelShort).ToList(),
+                    });
+                }
+            }
+            else
+            {
+                st.farHold = false;
+                if (pol.autoDraft && ranged.Count + melee.Count > 0) Deploy(st, pol, ranged, melee);
+            }
+            if (pol.shelter && !far) Shelter(st, nonCombat);
             if (pol.rescueDowned) RescueDowned(st, pol, true);
         }
 

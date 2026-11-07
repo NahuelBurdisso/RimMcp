@@ -22,6 +22,7 @@ namespace RimMcp
         public float engageMeleeRadius = 5f;
         public int undraftAfterQuietTicks = 600;
         public float defendIndoorsIfRatioAbove = 2.5f;
+        public float engageDistance = 45f;             // deploy only when an enemy is this close to home (0 = always)
         public List<string> ignoreFactions = new List<string>();
         // rescue
         public bool rescueDowned = true;
@@ -93,6 +94,7 @@ namespace RimMcp
                 p.engageMeleeRadius = F(c, "engageMeleeRadius", p.engageMeleeRadius);
                 p.undraftAfterQuietTicks = (int)F(c, "undraftAfterQuietTicks", p.undraftAfterQuietTicks);
                 p.defendIndoorsIfRatioAbove = F(c, "defendIndoorsIfRatioAbove", p.defendIndoorsIfRatioAbove);
+                p.engageDistance = F(c, "engageDistance", p.engageDistance);
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
                     p.ignoreFactions = il.Where(x => x != null).Select(x => x.ToString()).ToList();
@@ -170,6 +172,7 @@ namespace RimMcp
             sb.Append("    \"engageMeleeRadius\": ").Append(Num(engageMeleeRadius)).Append(",\n");
             sb.Append("    \"undraftAfterQuietTicks\": ").Append(undraftAfterQuietTicks).Append(",\n");
             sb.Append("    \"defendIndoorsIfRatioAbove\": ").Append(Num(defendIndoorsIfRatioAbove)).Append(",\n");
+            sb.Append("    \"engageDistance\": ").Append(Num(engageDistance)).Append(",\n");
             sb.Append("    \"ignoreFactions\": ").Append(Json.Write(ignoreFactions)).Append("\n");
             sb.Append("  },\n");
             sb.Append("  \"rescue\": {\"downedColonists\": ").Append(rescueDowned ? "true" : "false")
