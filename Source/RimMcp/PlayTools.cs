@@ -359,7 +359,12 @@ namespace RimMcp
                         var des = map.designationManager.AllDesignationsOn(p).Select(d => (object)d.def.defName).ToList();
                         if (des.Count > 0) o["designations"] = des;
                     }
-                    if (t is Plant pl) { o["growth"] = Pct(pl.Growth); o["harvestable"] = pl.HarvestableNow; }
+                    if (t is Plant pl)
+                    {
+                        o["growth"] = Pct(pl.Growth); o["harvestable"] = pl.HarvestableNow;
+                        var pdes = map.designationManager.AllDesignationsOn(pl).Select(d => (object)d.def.defName).ToList();
+                        if (pdes.Count > 0) o["designations"] = pdes;
+                    }
                     if (t.def.useHitPoints && t.HitPoints < t.MaxHitPoints) o["hpPct"] = Pct((float)t.HitPoints / t.MaxHitPoints);
                     return (object)o;
                 }).ToList(),
@@ -607,7 +612,13 @@ namespace RimMcp
                     ["bounds"] = new Dictionary<string, object> { ["x"] = cr.minX, ["z"] = cr.minZ, ["x2"] = cr.maxX, ["z2"] = cr.maxZ },
                 };
                 if (z is Zone_Growing g) { o["plant"] = g.GetPlantDefToGrow()?.defName; o["allowSow"] = g.allowSow; }
-                if (z is Zone_Stockpile s) o["priority"] = s.settings.Priority.ToString();
+                if (z is Zone_Stockpile s)
+                {
+                    o["priority"] = s.settings.Priority.ToString();
+                    // where wood goes and whether it stays dry (wood logs deteriorate unroofed)
+                    o["acceptsWood"] = s.settings.filter.Allows(ThingDefOf.WoodLog);
+                    o["roofedPct"] = z.cells.Count == 0 ? 0 : (int)Math.Round(100f * z.cells.Count(c => c.Roofed(map)) / z.cells.Count);
+                }
                 res.Add(o);
             }
             var areas = map.areaManager.AllAreas.Select(ar => (object)new Dictionary<string, object>

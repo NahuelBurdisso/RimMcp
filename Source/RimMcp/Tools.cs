@@ -126,6 +126,9 @@ namespace RimMcp
             // a player-forced job (e.g. "Rest until healed") keeps the pawn from eating by itself
             if (p.CurJob != null && p.CurJob.playerForced) r["forcedJob"] = true;
             if (p.InBed()) r["inBed"] = true;
+            // quest guests (lodgers, helpers) are free colonists too but leave with the quest: audit A-READY skips them
+            if (p.IsQuestLodger()) r["questLodger"] = true;
+            if (p.IsSlave) r["slave"] = true;
             if (p.needs?.food != null) r["foodPct"] = Pct(p.needs.food.CurLevelPercentage);
             var sick = p.health.hediffSet.hediffs.Where(h => h.Visible && h.def.lethalSeverity > 0f && h.TryGetComp<HediffComp_Immunizable>() != null).ToList();
             if (sick.Count > 0) r["diseases"] = sick.Select(h => (object)DiseaseInfo(h)).ToList();

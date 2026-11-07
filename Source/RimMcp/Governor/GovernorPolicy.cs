@@ -25,6 +25,9 @@ namespace RimMcp
         public float engageDistance = 45f;             // deploy only when an enemy is this close to home (0 = always)
         public int manualReleaseTicks = 1000;          // a colonist the player took, undrafted and idle this long, is the governor's again (0 = never)
         public float skirmishRadius = 20f;             // ...or this close to a colonist out there: the ones near it fight back (0 = off)
+        public bool freezeWhenEngaged = true;          // enemy in weapon range (or within 12 of the line): stations stay put, only 1-cell shifts
+        public int noLosTicksBeforeShift = 360;        // frozen: a shooter this long without a shot at anyone in range steps to an adjacent cell with one
+        public bool focusFire = true;                  // engaged: shooters on station shoot the same enemy (attack order) until it drops
         public List<string> ignoreFactions = new List<string>();
         // rescue
         public bool rescueDowned = true;
@@ -99,6 +102,9 @@ namespace RimMcp
                 p.engageDistance = F(c, "engageDistance", p.engageDistance);
                 p.skirmishRadius = F(c, "skirmishRadius", p.skirmishRadius);
                 p.manualReleaseTicks = (int)F(c, "manualReleaseTicks", p.manualReleaseTicks);
+                p.freezeWhenEngaged = B(c, "freezeWhenEngaged", p.freezeWhenEngaged);
+                p.focusFire = B(c, "focusFire", p.focusFire);
+                p.noLosTicksBeforeShift = Math.Max(120, (int)F(c, "noLosTicksBeforeShift", p.noLosTicksBeforeShift));
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
                     p.ignoreFactions = il.Where(x => x != null).Select(x => x.ToString()).ToList();
@@ -180,6 +186,9 @@ namespace RimMcp
             sb.Append("    \"engageDistance\": ").Append(Num(engageDistance)).Append(",\n");
             sb.Append("    \"skirmishRadius\": ").Append(Num(skirmishRadius)).Append(",\n");
             sb.Append("    \"manualReleaseTicks\": ").Append(manualReleaseTicks).Append(",\n");
+            sb.Append("    \"freezeWhenEngaged\": ").Append(freezeWhenEngaged ? "true" : "false").Append(",\n");
+            sb.Append("    \"noLosTicksBeforeShift\": ").Append(noLosTicksBeforeShift).Append(",\n");
+            sb.Append("    \"focusFire\": ").Append(focusFire ? "true" : "false").Append(",\n");
             sb.Append("    \"ignoreFactions\": ").Append(Json.Write(ignoreFactions)).Append("\n");
             sb.Append("  },\n");
             sb.Append("  \"rescue\": {\"downedColonists\": ").Append(rescueDowned ? "true" : "false")

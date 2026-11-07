@@ -42,6 +42,13 @@ namespace RimMcp
         public bool skirmishSent;                      // colonists near a far enemy were sent at it (event once)
         public float rangePull = 0.1f, planRangePull = 0.1f;
         public readonly Dictionary<Pawn, int> outOfRangeTicks = new Dictionary<Pawn, int>();
+        // engaged: an enemy inside a shooter's weapon range with a line of fire, or within 12 cells of the
+        // line. With freezeWhenEngaged the stations stay where they are (moving pawns do not shoot) until
+        // nobody is in contact for EngageReleaseTicks; only one-cell shifts (fire, flank, no line of fire).
+        public bool engaged;
+        public Pawn focusTarget;
+        public int lastContactTick = -100000, shifts;
+        public readonly Dictionary<Pawn, int> lastShiftTick = new Dictionary<Pawn, int>();
         public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent, manualHoldSent;
         public string planMode;
         public readonly List<Pawn> threats = new List<Pawn>();
@@ -76,6 +83,7 @@ namespace RimMcp
             firstDeployTick = -1; lastPlanTick = -100000; planMode = null;
             enemyCentroid = planCentroid = enemyFront = IntVec3.Invalid;
             closeCombat = false; rangePull = planRangePull = 0.1f; outOfRangeTicks.Clear();
+            engaged = false; focusTarget = null; lastContactTick = -100000; shifts = 0; lastShiftTick.Clear();
             rescuedCount = capturedCount = 0;
         }
     }
@@ -278,7 +286,10 @@ namespace RimMcp
             st.lastThreatTick = Find.TickManager.TicksGame;
             foreach (var p in st.threats) st.seen.Add(p);
             if (!st.active) StartThreat(st, pol);
-            else if (pol.autoDraft) PointBlank(st);
+            // no "point blank" order any more: vanilla cannot shoot an adjacent standing hostile
+            // (VerbUtility.AllowAdjacentShot -> EffectiveMinRange 1.421), so the AttackStatic it gave ended
+            // Incompletable and only broke the rifle-butt rhythm (sprint 4 harness: AttackStatic, 0 shots, 700 ticks)
+            else if (pol.autoDraft && pol.focusFire && st.engaged) Focus(st);
         }
 
         void StartThreat(GovMapState st, GovernorPolicy pol)
@@ -645,33 +656,6 @@ namespace RimMcp
             int t = Find.TickManager.TicksGame;
             foreach (var k in st.badCells.Where(kv => kv.Value < t).Select(kv => kv.Key).ToList()) st.badCells.Remove(k);
 
-            // flanked: an enemy shooter within 3 cells that this cell gives (almost) no cover against
-            // (melee attackers that close are a brawl, not a flank: moving away would not help)
-            bool flanked = false;
-            foreach (var kv in st.assign)
-            {
-                if (kv.Value.role != GovRole.Ranged) continue;
-                if (FireNear(kv.Value.cell, map))
-                {
-                    st.badCells[kv.Value.cell] = t + 900; // drafted pawns beat adjacent fires instead of shooting
-                    flanked = true;
-                    continue;
-                }
-                foreach (var e in st.threats)
-                {
-                    if ((e.Position - kv.Value.cell).LengthHorizontalSquared > 9 || !IsRanged(e)) continue;
-                    if (CoverUtility.CalculateOverallBlockChance(kv.Value.cell, e.Position, map) < 0.2f)
-                    {
-                        st.badCells[kv.Value.cell] = t + 900;
-                        flanked = true;
-                        break;
-                    }
-                }
-            }
-
-            bool roster = ranged.Any(p => !st.assign.TryGetValue(p, out var a) || a.role != GovRole.Ranged) ||
-                          melee.Any(p => !st.assign.TryGetValue(p, out var a) || a.role != GovRole.Melee) ||
-                          st.assign.Keys.Any(p => !ranged.Contains(p) && !melee.Contains(p));
             // close combat: someone is within 12 cells of our line. Then nobody walks around any more
             // (moving pawns do not shoot); they hold and fight where they are.
             st.closeCombat = false;
@@ -683,24 +667,72 @@ namespace RimMcp
                     { st.closeCombat = true; break; }
                 if (st.closeCombat) break;
             }
-            // outranged: shooters on station with nobody in range and line of fire for a while
-            bool outranged = false;
+            // per shooter: a target in weapon range with a line of fire from where it stands. Counts the
+            // ticks without one (on station) for the outranged pull and the frozen one-cell shift.
+            bool outranged = false, inRange = false;
             foreach (var p in ranged)
             {
+                bool any = HasShot(st, p, p.Position);
+                if (any) inRange = true;
                 if (!st.assign.TryGetValue(p, out var a) || p.Position != a.cell) { st.outOfRangeTicks.Remove(p); continue; }
-                float r = WeaponRange(p), r2 = r * r;
-                bool any = false;
-                foreach (var e in st.threats)
-                    if (e.Spawned && !e.Downed && (e.Position - p.Position).LengthHorizontalSquared <= r2 &&
-                        GovernorPositions.HasLineOfFire(p.Position, e.Position, map)) { any = true; break; }
                 st.outOfRangeTicks[p] = any ? 0 : (st.outOfRangeTicks.TryGetValue(p, out var n) ? n : 0) + 120;
                 if (st.outOfRangeTicks[p] >= 480) outranged = true;
             }
-            if (outranged && !st.closeCombat && st.rangePull < 1f) st.rangePull = 3f;
-            bool moved = !st.closeCombat && st.planCentroid.IsValid && (st.enemyCentroid - st.planCentroid).LengthHorizontal > 12f && t - st.lastPlanTick >= 300;
-            bool replan = st.assign.Count == 0 || roster || moved || st.overwhelmed != st.planOverwhelmed ||
-                          st.rangePull != st.planRangePull || flanked && t - st.lastPlanTick >= 250;
-            if (replan) Plan(st, pol, ranged, melee);
+            // harness A/B/C/F/G (sprint 3): with enemies already trading shots, every re-plan (the front moved,
+            // outranged pull, a retreat flipping "overwhelmed", a flank) sent the shooters walking for hundreds
+            // of ticks ("->stn 9 Goto") instead of shooting. Engaged = frozen until contact is lost.
+            if (st.closeCombat || inRange) st.lastContactTick = t;
+            bool wasEngaged = st.engaged;
+            st.engaged = pol.freezeWhenEngaged && st.assign.Count > 0 && t - st.lastContactTick < EngageReleaseTicks;
+            if (st.engaged != wasEngaged)
+                GovernorEvents.Emit(st.engaged ? "governor_hold" : "governor_release", map, new Dictionary<string, object>
+                {
+                    ["reason"] = st.engaged ? (st.closeCombat ? "enemy within 12 cells of the line" : "enemy in weapon range") : $"no contact for {EngageReleaseTicks} ticks",
+                    ["enemyFront"] = Pos(st.enemyFront), ["overwhelmed"] = st.overwhelmed,
+                });
+            bool frozen = st.engaged;
+
+            bool roster = ranged.Any(p => !st.assign.TryGetValue(p, out var a) || a.role != GovRole.Ranged) ||
+                          melee.Any(p => !st.assign.TryGetValue(p, out var a) || a.role != GovRole.Melee) ||
+                          st.assign.Keys.Any(p => !ranged.Contains(p) && !melee.Contains(p));
+            bool replan;
+            if (frozen)
+            {
+                // only newcomers get a station (a colonist back from a rescue); everyone else keeps theirs
+                foreach (var p in st.assign.Keys.Where(p => !ranged.Contains(p) && !melee.Contains(p) ||
+                                                            ranged.Contains(p) != (st.assign[p].role == GovRole.Ranged)).ToList())
+                    st.assign.Remove(p);   // gone (down, retreated, the player's) or changed role (lost the gun)
+                bool newcomer = ranged.Concat(melee).Any(p => !st.assign.ContainsKey(p));
+                replan = st.assign.Count == 0 || newcomer;
+                if (replan) Plan(st, pol, ranged, melee, frozen: true);
+                Shift(st, pol, ranged);
+            }
+            else
+            {
+                // flanked: an enemy shooter within 3 cells that this cell gives (almost) no cover against
+                // (melee attackers that close are a brawl, not a flank: moving away would not help)
+                bool flanked = false;
+                foreach (var kv in st.assign)
+                {
+                    if (kv.Value.role != GovRole.Ranged) continue;
+                    if (FireNear(kv.Value.cell, map))
+                    {
+                        st.badCells[kv.Value.cell] = t + 900; // drafted pawns beat adjacent fires instead of shooting
+                        flanked = true;
+                        continue;
+                    }
+                    if (FlankedBy(st, kv.Value.cell) != null)
+                    {
+                        st.badCells[kv.Value.cell] = t + 900;
+                        flanked = true;
+                    }
+                }
+                if (outranged && !st.closeCombat && st.rangePull < 1f) st.rangePull = 3f;
+                bool moved = !st.closeCombat && st.planCentroid.IsValid && (st.enemyCentroid - st.planCentroid).LengthHorizontal > 12f && t - st.lastPlanTick >= 300;
+                replan = st.assign.Count == 0 || roster || moved || st.overwhelmed != st.planOverwhelmed ||
+                         st.rangePull != st.planRangePull || flanked && t - st.lastPlanTick >= 250;
+                if (replan) Plan(st, pol, ranged, melee);
+            }
 
             if (st.firstDeployTick < 0) st.firstDeployTick = t;
             foreach (var p in ranged.Concat(melee))
@@ -724,8 +756,6 @@ namespace RimMcp
             }
         }
 
-        // Vanilla's drafted auto-attack swings the gun butt at an adjacent enemy. A shot at point
-        // blank does more: order the shooter to fire at it (as a player's attack click would).
         // far from home is not far from everyone: in run15 a cougar hunted Tomas 90 cells out while the
         // far hold kept the whole colony working, and he died alone. Colonists within skirmishRadius of
         // an enemy fight it (ranged shoot, melee charge); unarmed ones there run home; the rest keep working.
@@ -764,23 +794,153 @@ namespace RimMcp
             }
         }
 
-        void PointBlank(GovMapState st)
+        // Focus fire (a player's attack click): every shooter on station that can hit it shoots the same
+        // enemy until it drops, instead of vanilla's per-pawn pick spreading wounds over everyone. Target:
+        // most of our shooters have a shot at it, then the most hurt, then the closest to the line. Not one
+        // standing next to a colonist (no adjacent shots; friendly fire), never breaking a shot being aimed,
+        // and a shooter with an enemy next to him is left to his rifle butt.
+        void Focus(GovMapState st)
         {
-            foreach (var kv in st.assign)
+            var map = st.map;
+            var shooters = st.assign.Where(kv => kv.Value.role == GovRole.Ranged && kv.Key.Spawned && !kv.Key.Downed && kv.Key.Drafted &&
+                                                 Drafted.Contains(kv.Key) && IsRanged(kv.Key) && kv.Key.Position == kv.Value.cell)
+                                    .Select(kv => kv.Key).ToList();
+            if (shooters.Count == 0) return;
+            var cols = map.mapPawns.FreeColonistsSpawned;
+            Pawn best = null;
+            float bestScore = float.MinValue;
+            foreach (var e in st.threats)
             {
-                var p = kv.Key;
-                if (kv.Value.role != GovRole.Ranged || !p.Spawned || p.Downed || !p.Drafted || !Drafted.Contains(p) || !IsRanged(p)) continue;
-                if (p.stances.FullBodyBusy) continue;
+                if (!e.Spawned || e.Downed) continue;
+                bool nearOurs = false;
+                foreach (var c in cols) if (!c.Downed && GovernorPositions.Cheb(c.Position, e.Position) <= 1) { nearOurs = true; break; }
+                if (nearOurs) continue;
+                int n = 0;
+                float dmin = float.MaxValue;
+                foreach (var p in shooters)
+                {
+                    var v = p.TryGetAttackVerb(e);
+                    if (v != null && v.CanHitTargetFrom(p.Position, e)) n++;
+                    dmin = Mathf.Min(dmin, (e.Position - p.Position).LengthHorizontal);
+                }
+                if (n == 0) continue;
+                float score = n * 10f + (1f - e.health.summaryHealth.SummaryHealthPercent) * 25f - dmin * 0.3f;
+                if (score > bestScore) { bestScore = score; best = e; }
+            }
+            if (best == null) return;
+            foreach (var p in shooters)
+            {
+                if (p.stances.curStance is Stance_Warmup) continue;
                 var job = p.CurJob;
-                if (job != null && job.def == JobDefOf.AttackStatic && job.targetA.Thing is Pawn cur && cur.Spawned && !cur.Downed) continue;
-                if (job != null && (job.def == JobDefOf.Rescue || job.def == JobDefOf.Capture)) continue;
-                Pawn target = null;
-                foreach (var e in st.threats)
-                    if (e.Spawned && !e.Downed && GovernorPositions.Cheb(e.Position, p.Position) <= 1) { target = e; break; }
-                if (target == null) continue;
-                var attack = JobMaker.MakeJob(JobDefOf.AttackStatic, target);
+                if (job != null && job.def == JobDefOf.AttackStatic && job.targetA.Thing == best) continue;
+                bool adjacent = false;
+                foreach (var e in st.threats) if (e.Spawned && !e.Downed && GovernorPositions.Cheb(e.Position, p.Position) <= 1) { adjacent = true; break; }
+                if (adjacent) continue;
+                var v = p.TryGetAttackVerb(best);
+                if (v == null || !v.CanHitTargetFrom(p.Position, best)) continue;
+                var attack = JobMaker.MakeJob(JobDefOf.AttackStatic, best);
                 attack.endIfCantShootTargetFromCurPos = true;
+                attack.killIncappedTarget = false;
                 Order(st, p, attack);
+            }
+            st.focusTarget = best;
+        }
+
+        const int EngageReleaseTicks = 600;   // engaged ends after this long with nobody in range or within 12 of the line
+        const int ShiftCooldownTicks = 300;
+
+        // A target in weapon range with a line of fire (straight or leaning out) from this cell.
+        bool HasShot(GovMapState st, Pawn p, IntVec3 from)
+        {
+            float r = WeaponRange(p), r2 = r * r;
+            foreach (var e in st.threats)
+                if (e.Spawned && !e.Downed && (e.Position - from).LengthHorizontalSquared <= r2 &&
+                    GovernorPositions.HasLineOfFire(from, e.Position, st.map)) return true;
+            return false;
+        }
+
+        // An enemy shooter within 3 cells that this cell gives (almost) no cover against.
+        Pawn FlankedBy(GovMapState st, IntVec3 cell)
+        {
+            foreach (var e in st.threats)
+                if (e.Spawned && !e.Downed && IsRanged(e) && (e.Position - cell).LengthHorizontalSquared <= 9 &&
+                    CoverUtility.CalculateOverallBlockChance(cell, e.Position, st.map) < 0.2f) return e;
+            return null;
+        }
+
+        // Frozen line: a shooter moves only for a reason, one cell, never out in front of the line.
+        // Reasons: fire at the station, an enemy shooter flanking it at <= 3 cells with no cover, or
+        // noLosTicksBeforeShift on station without a shot at anyone in range (and the new cell has one).
+        // A melee attacker at the station is not a reason: one cell does not shake it off (it follows,
+        // and a gun cannot fire at an adjacent standing hostile anyway); melee fighters engage it.
+        void Shift(GovMapState st, GovernorPolicy pol, List<Pawn> ranged)
+        {
+            var map = st.map;
+            int t = Find.TickManager.TicksGame;
+            var enemy = st.enemyFront.IsValid ? st.enemyFront : st.enemyCentroid;
+            var dir = new Vector3(enemy.x - st.home.x, 0f, enemy.z - st.home.z);
+            if (dir.sqrMagnitude < 1f) dir = new Vector3(1f, 0f, 0f);
+            dir.Normalize();
+            float Along(IntVec3 c) => (c.x - st.home.x) * dir.x + (c.z - st.home.z) * dir.z;
+            var stationCells = st.assign.Values.Select(x => x.cell).ToList();
+            float front = stationCells.Count > 0 ? stationCells.Max(Along) : 0f;
+            foreach (var p in ranged)
+            {
+                if (!st.assign.TryGetValue(p, out var a) || a.role != GovRole.Ranged || p.Position != a.cell) continue;
+                if (st.lastShiftTick.TryGetValue(p, out var lt) && t - lt < ShiftCooldownTicks) continue;
+                if (p.stances.curStance is Stance_Warmup) continue; // never break a shot being aimed
+                string reason = null;
+                Pawn flanker = null;
+                if (FireNear(a.cell, map)) reason = "fire";
+                else if ((flanker = FlankedBy(st, a.cell)) != null) reason = "flanked";
+                else if (st.outOfRangeTicks.TryGetValue(p, out var n) && n >= pol.noLosTicksBeforeShift) reason = "no line of fire";
+                if (reason == null) continue;
+                float oldCover = flanker != null ? CoverUtility.CalculateOverallBlockChance(a.cell, flanker.Position, map) : 0f;
+                IntVec3 best = IntVec3.Invalid;
+                float bestScore = float.MinValue;
+                for (int i = 0; i < 8; i++)
+                {
+                    var c = a.cell + GenAdj.AdjacentCells[i];
+                    if (!c.InBounds(map) || !c.Standable(map) || c.GetDoor(map) != null || c.ContainsStaticFire(map)) continue;
+                    if (reason == "fire" && FireNear(c, map)) continue;
+                    if (Along(c) > front + 0.01f) continue;          // never step out in front of the line
+                    if (stationCells.Contains(c)) continue;
+                    var other = c.GetFirstPawn(map);
+                    if (other != null && other != p) continue;
+                    bool shot = HasShot(st, p, c);
+                    if (reason == "no line of fire" && !shot) continue;
+                    Pawn near = null;
+                    float nd = float.MaxValue;
+                    foreach (var e in st.threats)
+                    {
+                        if (!e.Spawned || e.Downed) continue;
+                        float d = (e.Position - c).LengthHorizontalSquared;
+                        if (d < nd) { nd = d; near = e; }
+                    }
+                    float score = (shot ? 50f : 0f) + (near != null ? CoverUtility.CalculateOverallBlockChance(c, near.Position, map) * 100f : 0f);
+                    if (flanker != null)
+                    {
+                        float cv = CoverUtility.CalculateOverallBlockChance(c, flanker.Position, map);
+                        if (cv < oldCover + 0.2f) continue;
+                        score += cv * 100f;
+                    }
+                    if (score <= bestScore || !p.CanReach(c, PathEndMode.OnCell, Danger.Deadly)) continue;
+                    bestScore = score;
+                    best = c;
+                }
+                st.lastShiftTick[p] = t;   // also when nothing fits: look again after the cooldown
+                if (!best.IsValid) continue;
+                var from = a.cell;
+                stationCells.Remove(from);
+                stationCells.Add(best);
+                a.cell = best;
+                a.arrivedTick = -1;
+                st.outOfRangeTicks[p] = 0;
+                st.shifts++;
+                GovernorEvents.Emit("governor_shift", map, new Dictionary<string, object>
+                {
+                    ["pawn"] = p.LabelShort, ["from"] = Pos(from), ["to"] = Pos(best), ["reason"] = reason,
+                });
             }
         }
 
@@ -794,14 +954,17 @@ namespace RimMcp
             return false;
         }
 
-        void Plan(GovMapState st, GovernorPolicy pol, List<Pawn> ranged, List<Pawn> melee)
+        // frozen: keep every current station (engaged line) and only place newcomers, in the plan's mode.
+        void Plan(GovMapState st, GovernorPolicy pol, List<Pawn> ranged, List<Pawn> melee, bool frozen = false)
         {
             var map = st.map;
             int t = Find.TickManager.TicksGame;
             var enemy = st.enemyFront.IsValid ? st.enemyFront : st.enemyCentroid;
             var home = st.home;
-            bool modeChanged = st.overwhelmed != st.planOverwhelmed || st.rangePull != st.planRangePull;
-            var polStations = st.overwhelmed ? null : GovernorPositions.PolicyStations(map, pol);
+            bool ov = frozen && st.planMode != null ? st.planOverwhelmed : st.overwhelmed;
+            float pull = frozen && st.planMode != null ? st.planRangePull : st.rangePull;
+            bool modeChanged = !frozen && (st.overwhelmed != st.planOverwhelmed || st.rangePull != st.planRangePull);
+            var polStations = ov ? null : GovernorPositions.PolicyStations(map, pol);
             float range = ranged.Count > 0 ? ranged.Average(WeaponRange) : 25f;
             List<GovernorPositions.Cand> cands;
             string mode;
@@ -813,12 +976,12 @@ namespace RimMcp
             }
             else
             {
-                mode = st.overwhelmed ? "fallback" : st.rangePull > 1f ? "auto, closing range" : "auto";
-                cands = GovernorPositions.FiringCells(map, home, enemy, st.overwhelmed, range, st.rangePull);
-                if (cands.Count == 0 && st.overwhelmed)
+                mode = ov ? "fallback" : pull > 1f ? "auto, closing range" : "auto";
+                cands = GovernorPositions.FiringCells(map, home, enemy, ov, range, pull);
+                if (cands.Count == 0 && ov)
                 {
                     mode = "auto";
-                    cands = GovernorPositions.FiringCells(map, home, enemy, false, range, st.rangePull);
+                    cands = GovernorPositions.FiringCells(map, home, enemy, false, range, pull);
                 }
                 cands.RemoveAll(c => st.badCells.ContainsKey(c.cell));
             }
@@ -831,9 +994,9 @@ namespace RimMcp
                 foreach (var p in ranged)
                 {
                     if (!st.assign.TryGetValue(p, out var old) || old.role != GovRole.Ranged || st.badCells.ContainsKey(old.cell)) continue;
-                    bool keep = polStations != null
+                    bool keep = frozen || (polStations != null
                         ? polStations.Contains(old.cell)
-                        : GovernorPositions.ScoreOf(map, home, enemy, old.cell, st.overwhelmed, range, st.rangePull) >= best - Mathf.Max(10f, Mathf.Abs(best) * 0.2f);
+                        : GovernorPositions.ScoreOf(map, home, enemy, old.cell, ov, range, pull) >= best - Mathf.Max(10f, Mathf.Abs(best) * 0.2f));
                     if (!keep) continue;
                     next[p] = old;
                     taken.Add(old.cell);
@@ -877,7 +1040,7 @@ namespace RimMcp
             foreach (var p in melee)
             {
                 if (!modeChanged && st.assign.TryGetValue(p, out var old) && old.role == GovRole.Melee &&
-                    (old.cell - hold).LengthHorizontal <= 4f && !taken.Contains(old.cell))
+                    (frozen || (old.cell - hold).LengthHorizontal <= 4f) && !taken.Contains(old.cell))
                 {
                     next[p] = old;
                     taken.Add(old.cell);
@@ -892,16 +1055,19 @@ namespace RimMcp
             bool changed = next.Count != st.assign.Count || next.Any(kv => !st.assign.TryGetValue(kv.Key, out var o) || o.cell != kv.Value.cell || o.role != kv.Value.role);
             st.assign.Clear();
             foreach (var kv in next) st.assign[kv.Key] = kv.Value;
-            st.planCentroid = st.enemyCentroid;
-            st.planOverwhelmed = st.overwhelmed;
-            st.planRangePull = st.rangePull;
+            if (!frozen || st.planMode == null)
+            {
+                st.planCentroid = st.enemyCentroid;
+                st.planOverwhelmed = st.overwhelmed;
+                st.planRangePull = st.rangePull;
+                st.planMode = mode;
+            }
             st.lastPlanTick = t;
-            st.planMode = mode;
             st.shelterCells = null;
             if (changed)
                 GovernorEvents.Emit("governor_deploy", map, new Dictionary<string, object>
                 {
-                    ["mode"] = mode,
+                    ["mode"] = frozen ? mode + ", frozen" : mode,
                     ["enemyAt"] = Pos(enemy),
                     ["assignments"] = st.assign.Select(kv => (object)new Dictionary<string, object>
                     {
@@ -1306,6 +1472,9 @@ namespace RimMcp
                 r["enemyCentroid"] = Pos(st.enemyCentroid);
                 r["enemyFront"] = Pos(st.enemyFront);
                 r["closeCombat"] = st.closeCombat;
+                r["engaged"] = st.engaged;
+                r["shifts"] = st.shifts;
+                r["focus"] = st.focusTarget != null && st.focusTarget.Spawned && !st.focusTarget.Downed ? st.focusTarget.LabelShort : null;
                 r["home"] = Pos(st.home);
                 r["mode"] = st.planMode;
                 r["sinceTicks"] = t - st.startTick;

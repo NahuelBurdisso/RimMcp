@@ -64,9 +64,18 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
   enemies that get within `engageMeleeRadius` of one. Positions face the enemy nearest to home,
   need a line of fire and are never inside closed rooms. They are re-planned when the enemy
   moves a lot, a station is flanked or burning, or shooters sit out of range for a while (then
-  closer cells win), keeping good stations (hysteresis). Once an enemy is within 12 cells of
-  the line nobody is moved any more (moving pawns do not shoot), and a shooter with an enemy
-  next to him is ordered to fire at it instead of swinging the gun butt.
+  closer cells win), keeping good stations (hysteresis). **Engaged** (an enemy in a shooter's
+  weapon range with a line of fire, or within 12 cells of the line) with `freezeWhenEngaged`
+  (default on): no re-plan at all until nobody is in contact for 600 ticks (`governor_hold` /
+  `governor_release` events) - not for a moved front, the outranged pull, a retreat that flips
+  "overwhelmed", nor a flank; only newcomers get a station. A shooter moves one cell (never out
+  in front of the line, `governor_shift`) when its station burns, an enemy shooter at <= 3 cells
+  has it uncovered, or it spent `noLosTicksBeforeShift` (360) on station without a shot at anyone
+  in range and the new cell has one. A shooter with an enemy next to him swings the gun butt (vanilla:
+  no shot at an adjacent standing hostile, `VerbUtility.AllowAdjacentShot`); melee fighters engage it.
+  `focusFire` (default on, while engaged): every shooter on station that can hit it is ordered to
+  attack the same enemy (most of our shooters have a shot at it, then the most hurt, then the
+  nearest; never one next to a colonist) until it drops; a shot being aimed is never broken.
 - **Retreat** below `retreatHealthPct` or above `retreatBleedRate`: undraft, go to bed.
   **Shelter**: non-combatants outdoors go to a roofed room. **Rescue** downed colonists when no
   enemy is within 10 cells. **Overwhelming** enemy (`defendIndoorsIfRatioAbove`; both sides
@@ -94,7 +103,8 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
             "stations": {"home": [[120, 98], [122, 98]]}, "homeCenter": null,
             "engageMeleeRadius": 5, "undraftAfterQuietTicks": 600,
             "defendIndoorsIfRatioAbove": 2.5, "engageDistance": 45, "skirmishRadius": 20,
-            "manualReleaseTicks": 1000, "ignoreFactions": []},
+            "manualReleaseTicks": 1000, "freezeWhenEngaged": true, "noLosTicksBeforeShift": 360, "focusFire": true,
+            "ignoreFactions": []},
  "rescue": {"downedColonists": true, "captureDowned": true},
  "nonCombatants": {"shelter": true},
  "events": {"maxFileKb": 512}}
@@ -102,7 +112,7 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
 
 - Events `<save data folder>/RimMcp/events.jsonl` (rotated to `events.1.jsonl`), one JSON
   object per line with `seq`, tick, date, hour, map, `type`: governor_active, threat_start,
-  governor_deploy, retreat, rescued, captured, player_override, manual_hold, manual_released,
+  governor_deploy, governor_hold, governor_release, governor_shift, retreat, rescued, captured, player_override, manual_hold, manual_released,
   decision_needed, threat_end,
   colonist_downed, colonist_died, mental_break, letter_received, quest_offer, alert_new,
   alert_cleared, fire_in_home, fire_out, governor_error. Read them with

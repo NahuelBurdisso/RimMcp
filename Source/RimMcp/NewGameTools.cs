@@ -322,6 +322,7 @@ namespace RimMcp
             var biome = Str(a, "biome", false);
             var hills = StrList(a, "hilliness");
             int minGrow = Int(a, "minGrowingTwelfths", 0);
+            int maxGrow = Int(a, "maxGrowingTwelfths", 12);   // a long winter: few growing months
             float? minT = a.TryGetValue("minTemp", out var mt) && mt is double mtd ? (float?)mtd : null;
             float? maxT = a.TryGetValue("maxTemp", out var xt) && xt is double xtd ? (float?)xtd : null;
             bool needRiver = Bool(a, "river", false), needCoast = Bool(a, "coastal", false);
@@ -340,7 +341,7 @@ namespace RimMcp
                 var pt = tile.tile;
                 if (minT.HasValue && GenTemperature.MinTemperatureAtTile(pt) < minT.Value) continue;
                 if (maxT.HasValue && GenTemperature.MaxTemperatureAtTile(pt) > maxT.Value) continue;
-                if (minGrow > 0 && GenTemperature.TwelfthsInAverageTemperatureRange(pt, 6f, 42f).Count < minGrow) continue;
+                if ((minGrow > 0 || maxGrow < 12) && GenTemperature.TwelfthsInAverageTemperatureRange(pt, 6f, 42f).Count is int g && (g < minGrow || g > maxGrow)) continue;
                 if (!TileFinder.IsValidTileForNewSettlement(pt)) continue;
                 res.Add(TileInfo(pt));
             }
