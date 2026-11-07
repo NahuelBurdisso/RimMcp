@@ -23,7 +23,7 @@ Claude Code --stdio--> Mcp/rimmcp_server.py --HTTP 127.0.0.1--> RimMcp mod (in g
 | `colonist` | traits, skills/passions, health conditions, mood thoughts, needs, work priorities, gear |
 | `resources` | stored items, loose items, forbidden loose items, edible nutrition, approx. food days |
 | `alerts` | active alerts with explanations, letters, on-screen messages |
-| `threats` | hostiles by faction/kind, fires, active conditions per map |
+| `threats` | hostiles by faction/kind, fires, active conditions per map; home maps add `raidPoints` (`StorytellerUtility.DefaultThreatPointsNow` and its factors) |
 | `set_speed` | pause / normal / fast / superfast |
 | `draft` | draft or undraft some or all colonists |
 | `set_work_priority` | 0-4 (does not switch the game's manual-priorities mode) |
@@ -75,7 +75,16 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
 - **End** after `undraftAfterQuietTicks` without a threat: undraft the pawns it drafted,
   re-equip dropped weapons, unforbid loot near base, capture downed enemies (free prisoner bed).
 - A colonist Claude drafts or orders (draft, drafted_move, orders, gizmos) or the player
-  undrafts during a fight is never touched again until the fight ends.
+  undrafts during a fight is left alone until the fight ends, or until it has stood undrafted
+  with no forced job for `manualReleaseTicks` (1000; 0 = never): then `manual_released` and the
+  governor uses it again. With every able colonist player-held the event is `manual_hold`, not
+  `decision_needed` ("no colonist can fight" is only for nobody able). A doctor tending a patient
+  who is not bleeding is a fighter, not busy.
+- `set_stations` takes `home_center: [x,z]` too (place.py writes both from the killbox plan).
+  `reach` takes `los_to: [[x,z],...]` and reports per cell how many of them it has a line of fire to.
+- Steward autosaves (toggles `steward.reflexes.autosavePreRaid` / `autosaveDaily`, `steward.autosaveKeep` 5):
+  `auto-pre-raid-d<day>h<hour>` at every threat_start, `auto-day-<n>` once per game day; older ones
+  beyond the newest 5 of each are deleted.
 - Policy `<save data folder>/RimMcp/governor.json` (created with defaults, disabled; re-read
   when it changes):
 
@@ -84,7 +93,8 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
  "combat": {"autoDraft": true, "retreatHealthPct": 0.5, "retreatBleedRate": 0.5,
             "stations": {"home": [[120, 98], [122, 98]]}, "homeCenter": null,
             "engageMeleeRadius": 5, "undraftAfterQuietTicks": 600,
-            "defendIndoorsIfRatioAbove": 2.5, "ignoreFactions": []},
+            "defendIndoorsIfRatioAbove": 2.5, "engageDistance": 45, "skirmishRadius": 20,
+            "manualReleaseTicks": 1000, "ignoreFactions": []},
  "rescue": {"downedColonists": true, "captureDowned": true},
  "nonCombatants": {"shelter": true},
  "events": {"maxFileKb": 512}}
@@ -92,14 +102,17 @@ enables it, and does only what a player could: draft, move, ordered jobs, forbid
 
 - Events `<save data folder>/RimMcp/events.jsonl` (rotated to `events.1.jsonl`), one JSON
   object per line with `seq`, tick, date, hour, map, `type`: governor_active, threat_start,
-  governor_deploy, retreat, rescued, captured, player_override, decision_needed, threat_end,
+  governor_deploy, retreat, rescued, captured, player_override, manual_hold, manual_released,
+  decision_needed, threat_end,
   colonist_downed, colonist_died, mental_break, letter_received, quest_offer, alert_new,
   alert_cleared, fire_in_home, fire_out, governor_error. Read them with
   `governor {action: "events", since: <next>}`.
 - Test harness: `mods/RimMcpGovTest` (`rw launch --ticks 25000`): baseline raid with the
   governor off, the same raid with it, manhunters, retreat + rescue, capture, manual-draft
   respect, a 7-raider raid, an attack from two sides. Logs per-colonist shots/damage/kills,
-  a trace every 240 ticks, and FAILs when the harness has to kill an enemy.
+  a trace every 240 ticks, and FAILs when the harness has to kill an enemy while the colonists
+  were not clearly winning (standing power ours >= 2x theirs at the time limit). Fixed roster
+  skills (shooting 8, melee 6) so runs compare. `play/harness.sh` runs it in a lean profile.
 
 ## Use
 

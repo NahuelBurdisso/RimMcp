@@ -133,11 +133,17 @@ namespace RimMcp
             var p = GovernorPolicy.Current.Clone();
             if (cells.Count == 0) p.stations.Remove(key);
             else p.stations[key] = cells;
+            // home_center: [x,z] (primary home map) - the killbox plan writes the base center with its stations
+            if (a.TryGetValue("home_center", out var hv) && hv is List<object> hl && hl.Count >= 2 && hl[0] is double hx && hl[1] is double hz)
+                p.homeCenter = new IntVec3((int)Math.Round(hx), 0, (int)Math.Round(hz));
+            else if (a.TryGetValue("home_center", out var hn) && hn == null)
+                p.homeCenter = IntVec3.Invalid;
             GovernorPolicy.Save(p);
             var r = new Dictionary<string, object>
             {
                 ["key"] = key,
                 ["stations"] = cells.Select(c => (object)Pos(c)).ToList(),
+                ["homeCenter"] = p.homeCenter.IsValid ? Pos(p.homeCenter) : null,
                 ["policyPath"] = GovernorPolicy.FilePath,
                 ["note"] = cells.Count == 0 ? "no stations: automatic positions (cover facing the enemy)" : "ranged fighters take the nearest free station",
             };

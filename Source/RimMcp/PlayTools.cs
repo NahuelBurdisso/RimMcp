@@ -1290,7 +1290,18 @@ namespace RimMcp
                 if (map.reachability.CanReach(c, to, PathEndMode.Touch, parms)) yes++;
                 else no.Add(Pos(c));
             }
-            return new Dictionary<string, object> { ["to"] = Pos(to), ["reachable"] = yes, ["unreachable"] = no };
+            var r = new Dictionary<string, object> { ["to"] = Pos(to), ["reachable"] = yes, ["unreachable"] = no };
+            // los_to: [[x,z],...] -> per cell, how many of those targets it has a line of fire to (killbox stations vs the funnel)
+            if (a.TryGetValue("los_to", out var lv) && lv is List<object> ll)
+            {
+                var targets = ll.OfType<List<object>>().Where(t => t.Count >= 2).Select(t => new IntVec3(Convert.ToInt32(t[0]), 0, Convert.ToInt32(t[1]))).Where(t => t.InBounds(map)).ToList();
+                r["los"] = cl.OfType<List<object>>().Where(l => l.Count >= 2).Select(l =>
+                {
+                    var c = new IntVec3(Convert.ToInt32(l[0]), 0, Convert.ToInt32(l[1]));
+                    return (object)new List<object> { c.x, c.z, c.InBounds(map) ? targets.Count(t => GovernorPositions.HasLineOfFire(c, t, map)) : 0, targets.Count };
+                }).ToList();
+            }
+            return r;
         }
 
         static object Power(Dictionary<string, object> a)

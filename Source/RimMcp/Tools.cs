@@ -197,6 +197,9 @@ namespace RimMcp
                 r["workPriorities"] = work;
             }
             r["weapon"] = p.equipment?.Primary?.LabelCap;
+            var wdef = p.equipment?.Primary?.def;
+            if (wdef != null && wdef.IsRangedWeapon) r["weaponRange"] = Math.Round(wdef.Verbs.FirstOrDefault()?.range ?? 0f);
+            if (p.WorkTagIsDisabled(WorkTags.Violent)) r["nonViolent"] = true;
             r["apparel"] = p.apparel?.WornApparel.Select(t => (object)t.LabelCap).ToList();
             r["inventory"] = p.inventory?.innerContainer.Select(t => (object)t.LabelCap).ToList();
             return r;
@@ -286,7 +289,7 @@ namespace RimMcp
                         ["kind"] = g.Key.kind,
                         ["count"] = g.Count(),
                     }).ToList();
-                r.Add(new Dictionary<string, object>
+                var entry = new Dictionary<string, object>
                 {
                     ["map"] = map.Parent?.LabelCap.ToString(),
                     ["hostiles"] = hostiles,
@@ -295,7 +298,26 @@ namespace RimMcp
                     ["homeFires"] = map.listerThings.ThingsOfDef(ThingDefOf.Fire).Count(f => map.areaManager.Home[f.Position]),
                     ["conditions"] = map.gameConditionManager.ActiveConditions
                         .Select(c => (object)c.LabelCap.ToString()).ToList(),
-                });
+                };
+                // what the storyteller would send now (StorytellerUtility.DefaultThreatPointsNow: deterministic for a
+                // map, IncidentPointsRandomFactorRange = 1); raids then scale it by strategy/arrival, this is the base
+                if (map.IsPlayerHome)
+                {
+                    var st = Find.Storyteller;
+                    float adapt = Find.StoryWatcher.watcherAdaptation.TotalThreatPointsFactor;
+                    entry["raidPoints"] = new Dictionary<string, object>
+                    {
+                        ["points"] = Math.Round(StorytellerUtility.DefaultThreatPointsNow(map)),
+                        ["wealth"] = Math.Round(map.PlayerWealthForStoryteller),
+                        ["storyteller"] = st.def.defName,
+                        ["difficulty"] = st.difficultyDef?.defName,
+                        ["threatScale"] = Math.Round(st.difficulty.threatScale, 2),
+                        ["adaptation"] = Math.Round(UnityEngine.Mathf.Lerp(1f, adapt, st.difficulty.adaptationEffectFactor), 2),
+                        ["daysPassedFactor"] = Math.Round(st.def.pointsFactorFromDaysPassed.Evaluate(GenDate.DaysPassedSinceSettle), 2),
+                        ["daysSinceSettle"] = GenDate.DaysPassedSinceSettle,
+                    };
+                }
+                r.Add(entry);
             }
             return r;
         }
