@@ -16,13 +16,14 @@ namespace RimMcp
         // combat
         public bool autoDraft = true;
         public float retreatHealthPct = 0.5f;
-        public float retreatBleedRate = 0.5f;          // BleedRateTotal: 1.0 = bleeds out in a day
+        public float retreatBleedRate = 3f;            // BleedRateTotal = blood loss per day (moderate 0.3 in ~2.4 h at 3); also retreats at blood loss 0.3
         public Dictionary<string, List<IntVec3>> stations = new Dictionary<string, List<IntVec3>>();
         public IntVec3 homeCenter = IntVec3.Invalid;   // applies to the primary home map
         public float engageMeleeRadius = 5f;
         public int undraftAfterQuietTicks = 600;
         public float defendIndoorsIfRatioAbove = 2.5f;
         public float engageDistance = 45f;             // deploy only when an enemy is this close to home (0 = always)
+        public int manualReleaseTicks = 1000;          // a colonist the player took, undrafted and idle this long, is the governor's again (0 = never)
         public float skirmishRadius = 20f;             // ...or this close to a colonist out there: the ones near it fight back (0 = off)
         public List<string> ignoreFactions = new List<string>();
         // rescue
@@ -97,6 +98,7 @@ namespace RimMcp
                 p.defendIndoorsIfRatioAbove = F(c, "defendIndoorsIfRatioAbove", p.defendIndoorsIfRatioAbove);
                 p.engageDistance = F(c, "engageDistance", p.engageDistance);
                 p.skirmishRadius = F(c, "skirmishRadius", p.skirmishRadius);
+                p.manualReleaseTicks = (int)F(c, "manualReleaseTicks", p.manualReleaseTicks);
                 if (c.TryGetValue("homeCenter", out var hc) && hc is List<object> hl) p.homeCenter = CellOf(hl);
                 if (c.TryGetValue("ignoreFactions", out var ig) && ig is List<object> il)
                     p.ignoreFactions = il.Where(x => x != null).Select(x => x.ToString()).ToList();
@@ -127,6 +129,7 @@ namespace RimMcp
                 p.steward.freezerTargetC = F(sw, "freezerTargetC", p.steward.freezerTargetC);
                 p.steward.forcedRestFoodPct = F(sw, "forcedRestFoodPct", p.steward.forcedRestFoodPct);
                 p.steward.feedBelowPct = F(sw, "feedBelowPct", p.steward.feedBelowPct);
+                p.steward.autosaveKeep = (int)F(sw, "autosaveKeep", p.steward.autosaveKeep);
             }
             var e = O(root, "events");
             if (e != null) p.maxFileKb = Math.Max(16, (int)F(e, "maxFileKb", p.maxFileKb));
@@ -175,6 +178,8 @@ namespace RimMcp
             sb.Append("    \"undraftAfterQuietTicks\": ").Append(undraftAfterQuietTicks).Append(",\n");
             sb.Append("    \"defendIndoorsIfRatioAbove\": ").Append(Num(defendIndoorsIfRatioAbove)).Append(",\n");
             sb.Append("    \"engageDistance\": ").Append(Num(engageDistance)).Append(",\n");
+            sb.Append("    \"skirmishRadius\": ").Append(Num(skirmishRadius)).Append(",\n");
+            sb.Append("    \"manualReleaseTicks\": ").Append(manualReleaseTicks).Append(",\n");
             sb.Append("    \"ignoreFactions\": ").Append(Json.Write(ignoreFactions)).Append("\n");
             sb.Append("  },\n");
             sb.Append("  \"rescue\": {\"downedColonists\": ").Append(rescueDowned ? "true" : "false")
@@ -187,7 +192,8 @@ namespace RimMcp
             sb.Append("    \"stopOn\": ").Append(Json.Write(steward.stopOn)).Append(",\n");
             sb.Append("    \"freezerTargetC\": ").Append(Num(steward.freezerTargetC)).Append(",\n");
             sb.Append("    \"forcedRestFoodPct\": ").Append(Num(steward.forcedRestFoodPct)).Append(",\n");
-            sb.Append("    \"feedBelowPct\": ").Append(Num(steward.feedBelowPct)).Append("\n");
+            sb.Append("    \"feedBelowPct\": ").Append(Num(steward.feedBelowPct)).Append(",\n");
+            sb.Append("    \"autosaveKeep\": ").Append(steward.autosaveKeep).Append("\n");
             sb.Append("  },\n");
             sb.Append("  \"events\": {\"maxFileKb\": ").Append(maxFileKb).Append("}\n");
             sb.Append("}\n");

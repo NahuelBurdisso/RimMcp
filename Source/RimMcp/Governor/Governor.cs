@@ -42,7 +42,7 @@ namespace RimMcp
         public bool skirmishSent;                      // colonists near a far enemy were sent at it (event once)
         public float rangePull = 0.1f, planRangePull = 0.1f;
         public readonly Dictionary<Pawn, int> outOfRangeTicks = new Dictionary<Pawn, int>();
-        public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent;
+        public bool overwhelmed, planOverwhelmed, decisionSent, noFightersSent, manualHoldSent;
         public string planMode;
         public readonly List<Pawn> threats = new List<Pawn>();
         public readonly HashSet<Pawn> seen = new HashSet<Pawn>();
@@ -72,7 +72,7 @@ namespace RimMcp
             lastOrderTick.Clear(); lastJobId.Clear(); ourJobs.Clear(); weapons.Clear(); badCells.Clear();
             startDowned.Clear(); ourDowned.Clear(); startColonists.Clear(); warnedNoBed.Clear();
             shelterCells = null; forbiddenSnapshot = null;
-            overwhelmed = planOverwhelmed = decisionSent = noFightersSent = skirmishSent = false;
+            overwhelmed = planOverwhelmed = decisionSent = noFightersSent = skirmishSent = manualHoldSent = false;
             firstDeployTick = -1; lastPlanTick = -100000; planMode = null;
             enemyCentroid = planCentroid = enemyFront = IntVec3.Invalid;
             closeCombat = false; rangePull = planRangePull = 0.1f; outOfRangeTicks.Clear();
@@ -90,6 +90,9 @@ namespace RimMcp
 
         public readonly HashSet<Pawn> Drafted = new HashSet<Pawn>();   // drafted by the governor, still ours
         public readonly HashSet<Pawn> Manual = new HashSet<Pawn>();    // the player took them: hands off until the threat ends
+        // ...or until they stand undrafted with no forced job for manualReleaseTicks: a driver that undrafted
+        // everyone mid-raid (after_raid run too early) left 3 healthy colonists "unable to fight" a drifter
+        readonly Dictionary<Pawn, int> manualSince = new Dictionary<Pawn, int>();
         readonly Dictionary<int, GovMapState> states = new Dictionary<int, GovMapState>();
         readonly GovernorWatch watch = new GovernorWatch();
         bool wasEnabled, policyPolled, ioWarned;
@@ -224,6 +227,7 @@ namespace RimMcp
         {
             Drafted.RemoveWhere(p => p == null || p.Dead || p.Destroyed || !p.Spawned || p.Downed || p.InMentalState || p.Faction != Faction.OfPlayer);
             Manual.RemoveWhere(p => p == null || p.Dead || p.Destroyed || !p.Spawned);
+            foreach (var p in manualSince.Keys.Where(k => !Manual.Contains(k)).ToList()) manualSince.Remove(p);
             foreach (var id in states.Keys.ToList())
             {
                 var st = states[id];
@@ -314,6 +318,7 @@ namespace RimMcp
                 ["home"] = Pos(st.home),
                 ["governor"] = pol.autoDraft ? "deploying" : "autoDraft off: not drafting",
             });
+            if (pol.steward.enabled) Steward.PreRaidSave(map);
             Heavy(st, pol);
         }
 
@@ -388,6 +393,7 @@ namespace RimMcp
                 Drafted.Remove(p);
                 st.assign.Remove(p);
                 Manual.Add(p);
+                manualSince[p] = Find.TickManager.TicksGame;
                 GovernorEvents.Emit("player_override", st.map, new Dictionary<string, object>
                 {
                     ["pawn"] = p.LabelShort, ["drafted"] = p.Drafted,
@@ -404,8 +410,20 @@ namespace RimMcp
             if (!g.states.TryGetValue(p.Map.uniqueID, out var st) || !st.active && !g.Drafted.Contains(p)) return;
             bool wasOurs = g.Drafted.Remove(p);
             st.assign.Remove(p);
+            g.manualSince[p] = Find.TickManager.TicksGame;
             if (!g.Manual.Add(p) || !wasOurs) return;
             GovernorEvents.Emit("player_override", p.Map, new Dictionary<string, object> { ["pawn"] = p.LabelShort, ["by"] = "tool" });
+        }
+
+        // A player-held pawn standing undrafted with no forced job for manualReleaseTicks goes back to the governor.
+        bool ReleaseManual(Pawn p, GovernorPolicy pol, int t)
+        {
+            if (!manualSince.TryGetValue(p, out var since)) { manualSince[p] = since = t; } // after a load: the clock starts now
+            if (pol.manualReleaseTicks <= 0 || p.Drafted || (p.CurJob?.playerForced ?? false) || t - since < pol.manualReleaseTicks) return false;
+            Manual.Remove(p);
+            manualSince.Remove(p);
+            GovernorEvents.Emit("manual_released", p.Map, new Dictionary<string, object> { ["pawn"] = p.LabelShort, ["idleTicks"] = t - since });
+            return true;
         }
 
         static bool CanOrder(Pawn p) => p.Spawned && !p.Dead && !p.Downed && p.IsColonistPlayerControlled && !p.InMentalState;
@@ -414,9 +432,13 @@ namespace RimMcp
             CanOrder(p) && !p.IsSlave && p.drafter != null && p.drafter.ShowDraftGizmo && !p.Deathresting &&
             !p.WorkTagIsDisabled(WorkTags.Violent) && p.health.capacities.CapableOf(PawnCapacityDefOf.Moving);
 
+        // Blood loss grows by BleedRateTotal per day (HediffGiver_Bleeding: +rate*0.001 every 60 ticks), moderate
+        // at 0.30, severe 0.45. One revolver wound bleeds ~1.4/day (+0.06 an hour): the old 0.5 threshold sent
+        // every shooter to bed at the first hit (harness D: 3 colonists retreated from one raider and lost).
         static bool NeedsRetreat(Pawn p, GovernorPolicy pol) =>
             p.health.summaryHealth.SummaryHealthPercent < pol.retreatHealthPct ||
-            p.health.hediffSet.BleedRateTotal >= pol.retreatBleedRate;
+            p.health.hediffSet.BleedRateTotal >= pol.retreatBleedRate ||
+            (p.health.hediffSet.GetFirstHediffOfDef(HediffDefOf.BloodLoss)?.Severity ?? 0f) >= 0.3f;
 
         // Same yardstick for both sides: people by what they carry (kind combat power assumes a
         // weapon, so unarmed raiders would look as strong as armed ones), animals and mechs by kind.
@@ -513,6 +535,7 @@ namespace RimMcp
             var melee = new List<Pawn>();
             var nonCombat = new List<Pawn>();
             var downed = new List<Pawn>();
+            var manualAble = new List<Pawn>();
             tmpPawns2.Clear();
             tmpPawns2.AddRange(map.mapPawns.FreeColonistsSpawned);
             foreach (var p in tmpPawns2)
@@ -524,8 +547,11 @@ namespace RimMcp
                     if (!st.startDowned.Contains(p)) st.ourDowned.Add(p);
                     continue;
                 }
-                if (Manual.Contains(p)) continue;
-                if (p.Drafted && !Drafted.Contains(p)) { Manual.Add(p); continue; } // drafted by the player before us
+                if (Manual.Contains(p))
+                {
+                    if (!ReleaseManual(p, pol, t)) { if (CanFight(p)) manualAble.Add(p); continue; }
+                }
+                if (p.Drafted && !Drafted.Contains(p)) { Manual.Add(p); manualSince[p] = t; continue; } // drafted by the player before us
                 if (st.retreated.Contains(p)) { KeepRetreated(st, p); continue; }
                 if (BusyWithOurTask(st, p)) continue;
                 if (!p.Drafted && BusyCarrying(p)) continue; // finishing a rescue/tend/capture first
@@ -548,7 +574,21 @@ namespace RimMcp
             if (!st.overwhelmed && ratio > pol.defendIndoorsIfRatioAbove) st.overwhelmed = true;
             else if (st.overwhelmed && ratio < pol.defendIndoorsIfRatioAbove * 0.8f) st.overwhelmed = false;
 
-            if (ranged.Count + melee.Count == 0)
+            if (ranged.Count + melee.Count == 0 && manualAble.Count > 0)
+            {
+                // not a decision: the player has them (or will hand them back after manualReleaseTicks idle)
+                if (!st.manualHoldSent)
+                {
+                    st.manualHoldSent = true;
+                    GovernorEvents.Emit("manual_hold", map, new Dictionary<string, object>
+                    {
+                        ["reason"] = "every able colonist is under manual control",
+                        ["pawns"] = manualAble.Select(p => (object)p.LabelShort).ToList(),
+                        ["releaseAfterIdleTicks"] = pol.manualReleaseTicks, ["enemyPower"] = Mathf.Round(st.enemyPower),
+                    });
+                }
+            }
+            else if (ranged.Count + melee.Count == 0)
             {
                 if (!st.noFightersSent)
                 {
@@ -965,10 +1005,15 @@ namespace RimMcp
             return best;
         }
 
+        // A doctor tending a patient who is not bleeding is not busy: the harness's raid A came right after the
+        // baseline fight and Kyle "TendPatient" (the wounded from the last fight, one wound after another) sat
+        // out the whole raid, 2 of 3 fighters drafted, the line fell back and lost. Only an emergency waits.
         static bool BusyCarrying(Pawn p)
         {
             var d = p.CurJobDef;
-            return d == JobDefOf.Rescue || d == JobDefOf.Capture || d == JobDefOf.TendPatient || p.carryTracker?.CarriedThing is Pawn;
+            if (d == JobDefOf.TendPatient)
+                return p.CurJob.targetA.Thing is Pawn pt && pt != p && pt.health.hediffSet.BleedRateTotal >= 0.1f;
+            return d == JobDefOf.Rescue || d == JobDefOf.Capture || p.carryTracker?.CarriedThing is Pawn;
         }
 
         static bool BusyWithCare(Pawn p)
