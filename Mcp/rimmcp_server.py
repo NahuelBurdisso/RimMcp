@@ -182,6 +182,12 @@ TOOLS += [
     {"name": "save", "read": False,
      "description": "Save the game (a normal save file, like the save menu). name optional.",
      "inputSchema": obj({"name": {"type": "string"}})},
+    {"name": "screenshot", "read": True,
+     "description": "PNG of the game view into the save data's Screenshots folder (written at the end of the next frame). "
+                    "x,z centre the camera on a cell, size = camera zoom (RootSize, ~11 close .. 60 the whole base), hideUi hides "
+                    "the interface for the shot, file = name without extension.",
+     "inputSchema": obj({"x": {"type": "integer"}, "z": {"type": "integer"}, "size": {"type": "number"}, "hideUi": {"type": "boolean"},
+                         "file": {"type": "string"}})},
     {"name": "dialogs", "read": True,
      "description": "Everything waiting for a decision: open dialogs with their options, letters (with options when "
                     "they are choice letters), quest offers with rewards and expiry, ongoing quests.",

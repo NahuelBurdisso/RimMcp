@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using RimWorld;
 using UnityEngine;
@@ -36,6 +37,7 @@ namespace RimMcp
                 ["orders"] = Orders,
                 ["run"] = RunFor,
                 ["save"] = Save,
+                ["screenshot"] = Screenshot,
                 ["dialogs"] = Dialogs,
                 ["choose"] = Choose,
                 ["trade"] = Trade,
@@ -420,23 +422,32 @@ namespace RimMcp
                 else if (!rep.Reason.NullOrEmpty()) AddReason(reasons, rep);
             }
             if (ok.Count > 0) des.DesignateMultiCell(ok);
-            if (type == "roof_build" && DebugSettings.godMode)
+            if ((type == "roof_build" || type == "roof_remove") && DebugSettings.godMode)
             {
-                // god mode: the roof goes up now over every cell of the rect the game itself wants roofed (the build-roof
-                // area: what the auto-roofer marks for enclosed rooms, plus what this call designated), where a roof can
-                // stand: within 6.9 of a holder, walking through cells that will be roofed too (the designator's own rule;
-                // without assumeNonNoRoofCellsAreRoofed only the cells next to a wall pass)
-                int roofed = 0;
-                var okSet = new HashSet<IntVec3>(ok);
+                // god mode: roofs change now. roof_build roofs the rect's cells that lie in an enclosed room the game's
+                // auto-roofer would roof (AutoBuildRoofAreaSetter: not touching the map edge, <= 320 cells) and that a holder
+                // supports within 6.9 (walking through cells that will be roofed too, the designator's own rule).
+                // A yard inside a perimeter ring is a room of thousands of cells: never roofed (the first version roofed the
+                // solar panels). roof_remove takes a constructed roof off at once (natural rock roofs stay).
+                int roofed = 0, removed = 0;
                 foreach (var c in rect)
                 {
-                    if (c.Roofed(map) || !c.InBounds(map)) continue;
-                    if (!okSet.Contains(c) && !map.areaManager.BuildRoof[c]) continue;
+                    if (!c.InBounds(map)) continue;
+                    if (type == "roof_remove")
+                    {
+                        var rd = c.GetRoof(map);
+                        if (rd != null && !rd.isNatural) { map.roofGrid.SetRoof(c, null); removed++; }
+                        continue;
+                    }
+                    if (c.Roofed(map)) continue;
+                    var room = c.GetRoom(map);
+                    if (room == null || room.TouchesMapEdge || room.CellCount > 320 || room.IsDoorway) continue;
                     if (!RoofCollapseUtility.WithinRangeOfRoofHolder(c, map, assumeNonNoRoofCellsAreRoofed: true)) continue;
                     map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
                     roofed++;
                 }
-                var r2 = new Dictionary<string, object> { ["type"] = type, ["cellsChecked"] = rect.Area, ["cellsDesignated"] = ok.Count, ["godModeRoofed"] = roofed };
+                var r2 = new Dictionary<string, object> { ["type"] = type, ["cellsChecked"] = rect.Area, ["cellsDesignated"] = ok.Count };
+                if (type == "roof_build") r2["godModeRoofed"] = roofed; else r2["godModeRemoved"] = removed;
                 if (reasons.Count > 0) r2["rejected"] = ReasonsObj(reasons);
                 return r2;
             }
@@ -1500,6 +1511,33 @@ namespace RimMcp
             pauseAtTick = -1;
             pauseReason = reason;
             stopRequest = null;
+        }
+
+        static object Screenshot(Dictionary<string, object> a)
+        {
+            // a PNG of the game view in the save data's Screenshots folder (Unity ScreenCapture: written at the end of the
+            // next frame, the game must be rendering). x,z centres the camera on that cell, size is the camera zoom
+            // (RootSize: ~11 close, 60 whole base), hideUi hides the interface for that frame.
+            RequireGame();
+            var cam = Find.CameraDriver;
+            var rootPos = (Vector3)typeof(CameraDriver).GetField("rootPos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(cam);
+            if (a.ContainsKey("x") && a.ContainsKey("z")) rootPos = new Vector3(Int(a, "x") + 0.5f, rootPos.y, Int(a, "z") + 0.5f);
+            float size = a.TryGetValue("size", out var s) && s is double d ? (float)d : cam.RootSize;
+            cam.SetRootPosAndSize(rootPos, size);
+            bool hideUi = Bool(a, "hideUi", false);
+            var name = GenFile.SanitizedFileName(Str(a, "file", false) ?? ("rimmcp-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+            var path = GenFilePaths.ScreenshotFolderPath + System.IO.Path.DirectorySeparatorChar + name + ".png";
+            if (hideUi) Find.ScreenshotModeHandler.Active = true;
+            LongEventHandler.ExecuteWhenFinished(() =>
+            {
+                ScreenshotTaker.TakeNonSteamShot(name);
+                if (hideUi) LongEventHandler.ExecuteWhenFinished(() => Find.ScreenshotModeHandler.Active = false);
+            });
+            return new Dictionary<string, object>
+            {
+                ["file"] = path, ["camera"] = new List<object> { rootPos.x, rootPos.z }, ["size"] = size,
+                ["note"] = "written at the end of the next frame (a paused game still renders unless minimized)",
+            };
         }
 
         static object Save(Dictionary<string, object> a)
