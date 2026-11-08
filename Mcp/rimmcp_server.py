@@ -200,14 +200,15 @@ TOOLS += [
 ]
 TOOLS.append(
     {"name": "newgame", "read": False,
-     "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | open (Page_SelectScenario) "
+     "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | godmode (on, research=true finishes every project; only when the user asks) | open (Page_SelectScenario) "
                     "| set (scenario=name; storyteller, difficulty, permadeath; seed, planetCoverage; tile; ideo=classic; "
-                    "reroll=[i..], swap=[i,j], index+nick, template=<Colony Template name>) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
+                    "count=N landing party size, reroll=[i..], swap=[i,j], index+nick, template=<Colony Template name>) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
                     "river, coastal, feature, limit) | next | back | confirm | cancel (confirmation boxes).",
      "inputSchema": obj({"action": {"type": "string"}, "scenario": {"type": "string"}, "storyteller": {"type": "string"},
                          "difficulty": {"type": "string"}, "permadeath": {"type": "boolean"}, "seed": {"type": "string"},
                          "planetCoverage": {"type": "number"}, "tile": {"type": "integer"}, "ideo": {"type": "string"},
-                         "reroll": {"type": "array", "items": {"type": "integer"}},
+                         "reroll": {"type": "array", "items": {"type": "integer"}}, "count": {"type": "integer"},
+                         "on": {"type": "boolean"}, "research": {"type": "boolean"},
                          "swap": {"type": "array", "items": {"type": "integer"}}, "index": {"type": "integer"},
                          "nick": {"type": "string"}, "template": {"type": "string"}, "name": {"type": "string"}, "biome": {"type": "string"},
                          "hilliness": {"type": "array", "items": {"type": "string"}}, "minTemp": {"type": "number"},

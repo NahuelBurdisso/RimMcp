@@ -420,6 +420,20 @@ namespace RimMcp
                 else if (!rep.Reason.NullOrEmpty()) AddReason(reasons, rep);
             }
             if (ok.Count > 0) des.DesignateMultiCell(ok);
+            if (type == "roof_build" && DebugSettings.godMode)
+            {
+                // god mode: the roof goes up now, where a roof could stand (a holder within range, not already roofed)
+                int roofed = 0;
+                foreach (var c in ok)
+                {
+                    if (c.Roofed(map) || !RoofCollapseUtility.WithinRangeOfRoofHolder(c, map)) continue;
+                    map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
+                    roofed++;
+                }
+                var r2 = new Dictionary<string, object> { ["type"] = type, ["cellsChecked"] = rect.Area, ["cellsDesignated"] = ok.Count, ["godModeRoofed"] = roofed };
+                if (reasons.Count > 0) r2["rejected"] = ReasonsObj(reasons);
+                return r2;
+            }
             var r = new Dictionary<string, object>
             {
                 ["type"] = type, ["cellsChecked"] = rect.Area, ["cellsDesignated"] = ok.Count,

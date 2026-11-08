@@ -185,16 +185,25 @@ namespace RimMcp
             if (p.needs?.mood != null)
             {
                 var groups = new List<Thought>();
-                p.needs.mood.thoughts.GetDistinctMoodThoughtGroups(groups);
-                r["moodThoughts"] = groups
-                    .Select(t => (t, off: p.needs.mood.thoughts.MoodOffsetOfGroup(t)))
-                    .Where(x => Math.Abs(x.off) > 0.01f)
-                    .OrderBy(x => x.off)
-                    .Select(x => (object)new Dictionary<string, object>
+                var moods = new List<object>();
+                try
+                {
+                    p.needs.mood.thoughts.GetDistinctMoodThoughtGroups(groups);
+                    foreach (var t in groups)
                     {
-                        ["thought"] = Clean(x.t.LabelCap),
-                        ["mood"] = (float)Math.Round(x.off, 1),
-                    }).ToList();
+                        // a modded thought with a bad stage index throws on LabelCap: skip it, keep the rest
+                        try
+                        {
+                            var off = p.needs.mood.thoughts.MoodOffsetOfGroup(t);
+                            if (Math.Abs(off) > 0.01f)
+                                moods.Add(new Dictionary<string, object> { ["thought"] = Clean(t.LabelCap), ["mood"] = (float)Math.Round(off, 1), ["_off"] = off });
+                        }
+                        catch (Exception e) { moods.Add(new Dictionary<string, object> { ["thought"] = "? (" + t.def?.defName + ": " + e.GetType().Name + ")", ["mood"] = 0f, ["_off"] = 0f }); }
+                    }
+                }
+                catch (Exception e) { r["moodThoughtsError"] = e.GetType().Name + ": " + e.Message; }
+                r["moodThoughts"] = moods.Cast<Dictionary<string, object>>().OrderBy(d => (float)d["_off"])
+                    .Select(d => { d.Remove("_off"); return (object)d; }).ToList();
             }
             r["needs"] = p.needs?.AllNeeds.Select(n => (object)new Dictionary<string, object>
             {
@@ -205,7 +214,12 @@ namespace RimMcp
             {
                 var work = Obj();
                 foreach (var w in DefDatabase<WorkTypeDef>.AllDefsListForReading.OrderByDescending(w => w.naturalPriority))
-                    work[w.defName] = p.WorkTypeIsDisabled(w) ? (object)"disabled" : p.workSettings.GetPriority(w);
+                {
+                    // a work settings map shorter than the WorkTypeDef list (a def added after the pawn was made)
+                    // throws here and in the game's own JobGiver_Work: report it instead of failing the whole sheet
+                    try { work[w.defName] = p.WorkTypeIsDisabled(w) ? (object)"disabled" : p.workSettings.GetPriority(w); }
+                    catch (ArgumentOutOfRangeException) { work[w.defName] = "ERROR: work settings out of date (newgame godmode repair_work=true)"; }
+                }
                 r["workPriorities"] = work;
             }
             r["weapon"] = p.equipment?.Primary?.LabelCap;

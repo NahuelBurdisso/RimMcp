@@ -38,8 +38,52 @@ namespace RimMcp
                 case "state": return PageState();
                 case "devmode_off":
                     Prefs.DevMode = false;
+                    DebugSettings.godMode = false;
                     Prefs.Save();
                     return "development mode is off";
+                case "godmode":
+                {
+                    // only when the user asks for it: development mode + god mode (instant, free building,
+                    // every designator visible); research=true finishes every project of the loaded game
+                    bool on = !a.ContainsKey("on") || Bool(a, "on", true);
+                    Prefs.DevMode = on;
+                    DebugSettings.godMode = on;
+                    Prefs.Save();
+                    var res = Obj();
+                    res["devMode"] = Prefs.DevMode;
+                    res["godMode"] = DebugSettings.godMode;
+                    if (Bool(a, "research", false))
+                    {
+                        if (Current.ProgramState != ProgramState.Playing) throw new ToolError("research: only with a game loaded");
+                        Find.ResearchManager.DebugSetAllProjectsFinished();
+                        res["research"] = "all projects finished";
+                    }
+                    if (Bool(a, "repair_work", false))
+                    {
+                        // a colonist whose work priorities map is shorter than the WorkTypeDef list cannot take any job
+                        // (Pawn_WorkSettings.GetPriority throws in JobGiver_Work): rebuild it (priorities reset to default)
+                        if (Current.ProgramState != ProgramState.Playing) throw new ToolError("repair_work: only with a game loaded");
+                        var fixedNames = new List<object>();
+                        foreach (var p in PawnsFinder.AllMapsCaravansAndTravellingTransporters_Alive_FreeColonists)
+                        {
+                            if (p.workSettings == null) continue;
+                            bool broken = false;
+                            foreach (var w in DefDatabase<WorkTypeDef>.AllDefsListForReading)
+                            {
+                                try { p.workSettings.GetPriority(w); }
+                                catch (Exception) { broken = true; break; }
+                            }
+                            if (broken || Bool(a, "force", false))
+                            {
+                                p.workSettings.EnableAndInitialize();
+                                fixedNames.Add(p.LabelShort);
+                            }
+                        }
+                        res["repairedWork"] = fixedNames;
+                        res["workTypeDefs"] = DefDatabase<WorkTypeDef>.DefCount;
+                    }
+                    return res;
+                }
                 case "open":
                 {
                     if (Current.ProgramState != ProgramState.Entry) throw new ToolError("only from the main menu");
@@ -102,7 +146,7 @@ namespace RimMcp
                     return "loading anyway";
                 }
                 case "tiles": return FindTiles(a);
-                default: throw new ToolError("action: state, devmode_off, open, set, tiles, next, back, confirm, cancel");
+                default: throw new ToolError("action: state, devmode_off, godmode, open, set, tiles, next, back, confirm, cancel");
             }
         }
 
@@ -245,6 +289,15 @@ namespace RimMcp
                 case Page_ConfigureStartingPawns _:
                 {
                     var gi = Find.GameInitData;
+                    if (a.ContainsKey("count"))
+                    {
+                        // more (or fewer) colonists than the scenario gives: the landing party size, new random
+                        // pawns added at the end (apply a template after this)
+                        int n = Int(a, "count");
+                        if (n < 1 || n > 10) throw new ToolError("count: 1..10");
+                        while (gi.startingAndOptionalPawns.Count < n) StartingPawnUtility.AddNewPawn();
+                        gi.startingPawnCount = n;
+                    }
                     if (a.ContainsKey("reroll"))
                     {
                         foreach (var s in StrList(a, "reroll"))
