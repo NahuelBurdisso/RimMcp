@@ -1318,8 +1318,9 @@ namespace RimMcp
         static object Power(Dictionary<string, object> a)
         {
             var map = CurMap();
-            return map.powerNetManager.AllNetsListForReading.Where(n => n.powerComps.Count > 0 || n.batteryComps.Count > 0).Select(n => (object)new Dictionary<string, object>
+            var nets = map.powerNetManager.AllNetsListForReading.Where(n => n.powerComps.Count > 0 || n.batteryComps.Count > 0).Select(n => (object)new Dictionary<string, object>
             {
+                ["producerCount"] = n.powerComps.Count(c => c is CompPowerPlant),
                 ["gainWatts"] = Math.Round(n.CurrentEnergyGainRate() / CompPower.WattsToWattDaysPerTick),
                 ["storedWd"] = Math.Round(n.CurrentStoredEnergy()),
                 ["batteries"] = n.batteryComps.Count,
@@ -1330,6 +1331,15 @@ namespace RimMcp
                 ["idleProducers"] = n.powerComps.Where(c => c is CompPowerPlant && c.PowerOn && c.PowerOutput <= 0)
                     .Select(c => (object)$"{c.parent.LabelCap} at ({c.parent.Position.x},{c.parent.Position.z}): {OffReason(c)}").ToList(),
             }).ToList();
+            // consumers on no net at all (no transmitter within 6 cells, PowerConnectionMaker.ConnectMaxDist):
+            // the game lists them nowhere else, and the desert freezer sat at 18.9 C with its cooler like this
+            var loose = map.listerBuildings.allBuildingsColonist
+                .Select(b => b.TryGetComp<CompPowerTrader>())
+                .Where(c => c != null && c.PowerNet == null && c.Props.PowerConsumption > 0 && !c.parent.def.EverTransmitsPower)
+                .Select(c => (object)$"{c.parent.LabelCap} at ({c.parent.Position.x},{c.parent.Position.z}): not connected (no conduit within 6)").ToList();
+            if (loose.Count > 0)
+                nets.Add(new Dictionary<string, object> { ["unconnected"] = loose, ["gainWatts"] = 0, ["storedWd"] = 0, ["batteries"] = 0 });
+            return nets;
         }
 
         // ------------------------------------------------------------------ prisoners
