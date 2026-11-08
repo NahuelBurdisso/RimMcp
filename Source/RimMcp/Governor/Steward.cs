@@ -28,7 +28,7 @@ namespace RimMcp
 
         public static void Reset()
         {
-            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear();
+            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear(); lastArm.Clear();
             LastSaveDay = int.MinValue;
         }
 
@@ -166,6 +166,7 @@ namespace RimMcp
             if (On("thermostats")) Thermostats(map);
             if (On("newColonistArea")) Areas(map, pawns);
             if (On("unforbidWeapons") && !threat) Weapons(map, pawns);
+            if (On("armNewColonist") && !threat) Arm(map, pawns, now);
             if (On("roofValuables") && now % 15000 < 250) Valuables(map);
             if (On("autosaveDaily") && map == GovernorPositions.PrimaryHome) DailySave(map);
         }
@@ -396,6 +397,55 @@ namespace RimMcp
             }
         }
 
+        // armNewColonist: a colonist able to fight with no weapon (a new joiner, a freed prisoner, the crash landing)
+        // and a loose one within 30 cells -> unforbid it and equip it. Best first: ranged by range (rifle 36.9 >
+        // revolver 25.9 > bow 22.9 > shotgun 15.9 for the reflex; playbook day1 ranks shotguns above bows), then
+        // melee. Gauntlet 4 (B5): two colonists fist-fought ferraliscs with a rifle on the landing. One try per
+        // pawn per 2500 ticks.
+        static readonly Dictionary<Pawn, int> lastArm = new Dictionary<Pawn, int>();
+
+        static float WeaponValue(Thing t)
+        {
+            var d = t.def;
+            if (d.defName.IndexOf("Grenade", StringComparison.OrdinalIgnoreCase) >= 0 || d.defName.IndexOf("Molotov", StringComparison.OrdinalIgnoreCase) >= 0
+                || d.defName.IndexOf("EMP", StringComparison.Ordinal) >= 0 || d.defName.IndexOf("Smoke", StringComparison.OrdinalIgnoreCase) >= 0) return 0f;
+            if (d.IsRangedWeapon) return 100f + (d.Verbs.FirstOrDefault()?.range ?? 0f);
+            if (d.IsMeleeWeapon) return 10f + Math.Min(50f, d.BaseMarketValue / 10f);
+            return 0f;
+        }
+
+        static void Arm(Map map, List<Pawn> pawns, int now)
+        {
+            foreach (var p in pawns)
+            {
+                if (p.equipment == null || p.equipment.Primary != null || p.Downed || p.Drafted || p.InMentalState) continue;
+                if (p.WorkTagIsDisabled(WorkTags.Violent)) continue;
+                if (lastWeapon.TryGetValue(p, out var dropped))
+                {
+                    // its own dropped weapon still lies near: unforbidWeapons picks that one; gone -> arm from scratch
+                    if (map.listerThings.ThingsOfDef(dropped).Any(t => t.Spawned && t.Position.InHorDistOf(p.Position, 12f))) continue;
+                    lastWeapon.Remove(p);
+                }
+                if (lastArm.TryGetValue(p, out var t0) && now - t0 < 2500) continue;
+                if (p.CurJobDef == JobDefOf.Equip) continue;
+                lastArm[p] = now;
+                Thing best = null; float bestV = 0f;
+                foreach (var t in map.listerThings.ThingsInGroup(ThingRequestGroup.Weapon))
+                {
+                    if (!t.Spawned || t.Fogged() || !t.Position.InHorDistOf(p.Position, 30f)) continue;
+                    float v = WeaponValue(t);
+                    if (v <= bestV || !EquipmentUtility.CanEquip(t, p) || !p.CanReserveAndReach(t, PathEndMode.ClosestTouch, Danger.Some)) continue;
+                    best = t; bestV = v;
+                }
+                if (best == null) continue;
+                bool wasForbidden = best.IsForbidden(Faction.OfPlayer);
+                best.SetForbidden(false, false);
+                bool ok = p.jobs.TryTakeOrderedJob(JobMaker.MakeJob(JobDefOf.Equip, best), JobTag.Misc);
+                Did(map, "armNewColonist", $"{p.LabelShort} had no weapon -> {(ok ? "equips" : "could not take the job for")} {best.LabelCap} at {best.Position.x},{best.Position.z}"
+                    + (wasForbidden ? " (unforbidden)" : ""), new Dictionary<string, object> { ["pawn"] = p.LabelShort, ["weapon"] = best.def.defName, ["ok"] = ok });
+            }
+        }
+
         static void Valuables(Map map)
         {
             foreach (var z in map.zoneManager.AllZones.OfType<Zone_Stockpile>())
@@ -419,7 +469,7 @@ namespace RimMcp
         public static readonly string[] Reflexes =
         {
             "rescue", "tend", "feedPatients", "clearForcedRest", "diseaseAlarm", "research", "closeRoutineWindows",
-            "dismissRoutineLetters", "power", "thermostats", "newColonistArea", "unforbidWeapons", "roofValuables", "stopRun",
+            "dismissRoutineLetters", "power", "thermostats", "newColonistArea", "unforbidWeapons", "armNewColonist", "roofValuables", "stopRun",
             "answerNames", "forcedChoice", "refuel", "autosavePreRaid", "autosaveDaily",
         };
         public Dictionary<string, bool> reflexes = Reflexes.ToDictionary(r => r, r => true);
