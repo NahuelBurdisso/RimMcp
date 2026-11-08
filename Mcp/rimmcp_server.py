@@ -206,7 +206,7 @@ TOOLS += [
 ]
 TOOLS.append(
     {"name": "newgame", "read": False,
-     "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | godmode (on, research=true finishes every project; only when the user asks) | open (Page_SelectScenario) "
+     "description": "Main menu: saves (list) | load (name). Drive the New colony pages. action: state | devmode_off | godmode (on, research=true finishes every project, repair_work, tidy=true + x,z,x2,z2 [chunks] stores every loose item of the rect at once; only when the user asks) | open (Page_SelectScenario) "
                     "| set (scenario=name; storyteller, difficulty, permadeath; seed, planetCoverage; tile; ideo=classic; "
                     "count=N landing party size, reroll=[i..], swap=[i,j], index+nick, template=<Colony Template name>) | tiles (biome, hilliness, minTemp, maxTemp, minGrowingTwelfths, "
                     "river, coastal, feature, limit) | next | back | confirm | cancel (confirmation boxes).",
@@ -214,7 +214,7 @@ TOOLS.append(
                          "difficulty": {"type": "string"}, "permadeath": {"type": "boolean"}, "seed": {"type": "string"},
                          "planetCoverage": {"type": "number"}, "tile": {"type": "integer"}, "ideo": {"type": "string"},
                          "reroll": {"type": "array", "items": {"type": "integer"}}, "count": {"type": "integer"},
-                         "on": {"type": "boolean"}, "research": {"type": "boolean"},
+                         "on": {"type": "boolean"}, "research": {"type": "boolean"}, "tidy": {"type": "boolean"}, "chunks": {"type": "boolean"}, "repair_work": {"type": "boolean"}, "x": {"type": "integer"}, "z": {"type": "integer"}, "x2": {"type": "integer"}, "z2": {"type": "integer"},
                          "swap": {"type": "array", "items": {"type": "integer"}}, "index": {"type": "integer"},
                          "nick": {"type": "string"}, "template": {"type": "string"}, "name": {"type": "string"}, "biome": {"type": "string"},
                          "hilliness": {"type": "array", "items": {"type": "string"}}, "minTemp": {"type": "number"},

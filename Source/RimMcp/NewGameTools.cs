@@ -58,6 +58,39 @@ namespace RimMcp
                         Find.ResearchManager.DebugSetAllProjectsFinished();
                         res["research"] = "all projects finished";
                     }
+                    if (Bool(a, "tidy", false))
+                    {
+                        // god mode housekeeping: every loose haulable in the rect goes straight into the best stockpile
+                        // that accepts it (StoreUtility, the haulers' own search), stacks merged; chunks:false leaves rock
+                        // chunks alone. What no stockpile takes is listed and stays where it is.
+                        if (Current.ProgramState != ProgramState.Playing) throw new ToolError("tidy: only with a game loaded");
+                        var map = Find.CurrentMap;
+                        var rect = Rect(a, map, 200000);
+                        bool chunks = !a.ContainsKey("chunks") || Bool(a, "chunks", true);
+                        var loose = map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver)
+                            .Where(t => t.Spawned && rect.Contains(t.Position) && !(t is Corpse) && !t.IsInValidStorage()
+                                        && (chunks || !(t.def.thingCategories?.Any(c => c.defName == "StoneChunks" || c.defName == "Chunks") ?? false)))
+                            .ToList();
+                        int moved = 0;
+                        var noStore = new Dictionary<string, int>();
+                        foreach (var t in loose)
+                        {
+                            if (!t.Spawned) continue;      // merged into another stack already
+                            t.SetForbidden(false, warnOnFail: false);
+                            if (!StoreUtility.TryFindBestBetterStoreCellFor(t, null, map, StoragePriority.Unstored, Faction.OfPlayer, out var cell, true))
+                            {
+                                var k = t.def.label;
+                                noStore[k] = noStore.TryGetValue(k, out var n) ? n + 1 : 1;
+                                continue;
+                            }
+                            t.DeSpawn();
+                            if (!GenPlace.TryPlaceThing(t, cell, map, ThingPlaceMode.Direct) && !t.Destroyed && !t.Spawned)
+                                GenPlace.TryPlaceThing(t, cell, map, ThingPlaceMode.Near);
+                            moved++;
+                        }
+                        res["tidy"] = new Dictionary<string, object> { ["loose"] = loose.Count, ["stored"] = moved,
+                            ["noStockpile"] = noStore.ToDictionary(kv => kv.Key, kv => (object)kv.Value) };
+                    }
                     if (Bool(a, "repair_work", false))
                     {
                         // a colonist whose work priorities map is shorter than the WorkTypeDef list cannot take any job
