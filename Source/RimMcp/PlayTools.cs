@@ -422,11 +422,17 @@ namespace RimMcp
             if (ok.Count > 0) des.DesignateMultiCell(ok);
             if (type == "roof_build" && DebugSettings.godMode)
             {
-                // god mode: the roof goes up now, where a roof could stand (a holder within range, not already roofed)
+                // god mode: the roof goes up now over every cell of the rect the game itself wants roofed (the build-roof
+                // area: what the auto-roofer marks for enclosed rooms, plus what this call designated), where a roof can
+                // stand: within 6.9 of a holder, walking through cells that will be roofed too (the designator's own rule;
+                // without assumeNonNoRoofCellsAreRoofed only the cells next to a wall pass)
                 int roofed = 0;
-                foreach (var c in ok)
+                var okSet = new HashSet<IntVec3>(ok);
+                foreach (var c in rect)
                 {
-                    if (c.Roofed(map) || !RoofCollapseUtility.WithinRangeOfRoofHolder(c, map)) continue;
+                    if (c.Roofed(map) || !c.InBounds(map)) continue;
+                    if (!okSet.Contains(c) && !map.areaManager.BuildRoof[c]) continue;
+                    if (!RoofCollapseUtility.WithinRangeOfRoofHolder(c, map, assumeNonNoRoofCellsAreRoofed: true)) continue;
                     map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
                     roofed++;
                 }
