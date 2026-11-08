@@ -421,8 +421,11 @@ namespace RimMcp
                 if (rep.Accepted) ok.Add(c);
                 else if (!rep.Reason.NullOrEmpty()) AddReason(reasons, rep);
             }
-            if (ok.Count > 0) des.DesignateMultiCell(ok);
-            if ((type == "roof_build" || type == "roof_remove") && DebugSettings.godMode)
+            bool godRoof = (type == "roof_build" || type == "roof_remove") && DebugSettings.godMode;
+            // god mode roofs act now: no build-roof / no-roof area is painted (a no-roof area over the rooms would make
+            // the colonists take their roofs off afterwards)
+            if (ok.Count > 0 && !godRoof) des.DesignateMultiCell(ok);
+            if (godRoof)
             {
                 // god mode: roofs change now. roof_build roofs the rect's cells that lie in an enclosed room the game's
                 // auto-roofer would roof (AutoBuildRoofAreaSetter: not touching the map edge, <= 320 cells) and that a holder
