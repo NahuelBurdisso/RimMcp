@@ -398,12 +398,13 @@ namespace RimMcp
                 case "unforbid": case "allow": return new Designator_Unforbid();
                 case "roof_build": return new Designator_AreaBuildRoof();
                 case "roof_remove": return new Designator_AreaNoRoof();
+                case "roof_clear": return new Designator_AreaIgnoreRoof();   // clears build-roof and no-roof areas, roofs stay
                 case "home_add": return new Designator_AreaHomeExpand();
                 case "home_remove": return new Designator_AreaHomeClear();
                 default:
                     throw new ToolError("type must be one of: mine, cut, chop, harvest, hunt, tame, slaughter, deconstruct, " +
                                         "uninstall, cancel, haul, smooth, remove_floor, claim, strip, forbid, unforbid, " +
-                                        "roof_build, roof_remove, home_add, home_remove");
+                                        "roof_build, roof_remove, roof_clear, home_add, home_remove");
             }
         }
 
