@@ -1531,6 +1531,9 @@ namespace RimMcp
             float size = a.TryGetValue("size", out var s) && s is double d ? (float)d : cam.RootSize;
             cam.SetRootPosAndSize(rootPos, size);
             bool hideUi = Bool(a, "hideUi", false);
+            // dev mode auto-opens the debug log on any error and it covers the middle of the shot
+            if (!a.ContainsKey("closeLog") || Bool(a, "closeLog", true))
+                foreach (var w in Find.WindowStack.Windows.OfType<LudeonTK.EditWindow_Log>().ToList()) w.Close(false);
             var name = GenFile.SanitizedFileName(Str(a, "file", false) ?? ("rimmcp-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
             var path = GenFilePaths.ScreenshotFolderPath + System.IO.Path.DirectorySeparatorChar + name + ".png";
             if (hideUi) Find.ScreenshotModeHandler.Active = true;

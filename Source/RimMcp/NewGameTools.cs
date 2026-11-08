@@ -76,6 +76,13 @@ namespace RimMcp
                         foreach (var t in loose)
                         {
                             if (!t.Spawned) continue;      // merged into another stack already
+                            // a stack a colonist has reserved (a haul on its way) stays: moving it broke the job
+                            // ("Tried to split off 40 of WoodLog but there are only 12")
+                            if (map.reservationManager.IsReservedByAnyoneOf(t, Faction.OfPlayer) || map.physicalInteractionReservationManager.IsReserved(t))
+                            {
+                                noStore["(reserved: left for its hauler)"] = noStore.TryGetValue("(reserved: left for its hauler)", out var rn) ? rn + 1 : 1;
+                                continue;
+                            }
                             t.SetForbidden(false, warnOnFail: false);
                             if (!StoreUtility.TryFindBestBetterStoreCellFor(t, null, map, StoragePriority.Unstored, Faction.OfPlayer, out var cell, true))
                             {
