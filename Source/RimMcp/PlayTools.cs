@@ -444,7 +444,9 @@ namespace RimMcp
                     }
                     if (c.Roofed(map)) continue;
                     var room = c.GetRoom(map);
-                    if (room == null || room.TouchesMapEdge || room.CellCount > 320 || room.IsDoorway) continue;
+                    // force: the rect is roofed even in a big room (a shooting bunker open to its kill zone through
+                    // barricades is one room with it); without it only enclosed rooms <= 320 cells
+                    if (!Bool(a, "force", false) && (room == null || room.TouchesMapEdge || room.CellCount > 320 || room.IsDoorway)) continue;
                     if (!RoofCollapseUtility.WithinRangeOfRoofHolder(c, map, assumeNonNoRoofCellsAreRoofed: true)) continue;
                     map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
                     roofed++;
