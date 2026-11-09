@@ -121,6 +121,13 @@ TOOLS += [
      "inputSchema": obj({"def": {"type": "string"}, **RECT, "rot": {"type": "string"}, "stuff": {"type": "string"},
                          "outline": {"type": "boolean"}, "planned": {"type": "boolean"},
                          "dry": {"type": "boolean", "description": "true: place nothing; say which cells the game would accept or reject and why (+ occupies, interactionCell)"}}, ["def", "x", "z"])},
+    {"name": "install", "read": False,
+     "description": "Install a minified thing (a finished sculpture, an uninstalled bench) at x,z like the Install "
+                    "gizmo: a Blueprint_Install a colonist carries it to. id = the minified thing's id (or its inner "
+                    "thing's); without id, the best-quality match of query (defName / label part), no query = any art. "
+                    "dry=true only checks the cell.",
+     "inputSchema": obj({"id": {"type": "string"}, "query": {"type": "string"}, "x": {"type": "integer"}, "z": {"type": "integer"},
+                         "rot": {"type": "string"}, "dry": {"type": "boolean"}}, ["x", "z"])},
     {"name": "zones", "read": True,
      "description": "All zones (growing with plant, stockpiles with priority, bounds) and areas (home, roof, allowed).",
      "inputSchema": obj({})},

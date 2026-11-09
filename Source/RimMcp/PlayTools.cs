@@ -25,6 +25,7 @@ namespace RimMcp
                 ["designate"] = Designate,
                 ["buildable"] = Buildable,
                 ["build"] = Build,
+                ["install"] = Install,
                 ["zone"] = ZoneTool,
                 ["zones"] = ZonesList,
                 ["research"] = Research,
@@ -548,6 +549,66 @@ namespace RimMcp
             return res;
         }
 
+        // install {id | query, x, z, rot, dry}: place a minified thing (a finished sculpture, an uninstalled bench)
+        // the way the Install gizmo does (Designator_Install: wipe, Blueprint_Install); a colonist carries it there.
+        // Without id it takes the best-quality match of query among the colony's minified things; no query = any art.
+        static string pendingShot;
+        static int pendingShotFrame = -1, restoreUiFrame = -1;
+
+        public static void FrameShots()
+        {
+            int f = UnityEngine.Time.frameCount;
+            if (pendingShot != null && f >= pendingShotFrame)
+            {
+                ScreenshotTaker.TakeNonSteamShot(pendingShot);
+                pendingShot = null;
+                restoreUiFrame = f + 3;
+            }
+            else if (restoreUiFrame >= 0 && f >= restoreUiFrame)
+            {
+                restoreUiFrame = -1;
+                if (Find.ScreenshotModeHandler != null) Find.ScreenshotModeHandler.Active = false;
+            }
+        }
+
+        static object Install(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            var minis = map.listerThings.ThingsInGroup(ThingRequestGroup.MinifiedThing).OfType<MinifiedThing>()
+                .Where(m => m.Spawned).ToList();
+            var id = Str(a, "id", false);
+            var query = Str(a, "query", false);
+            MinifiedThing mini;
+            if (id != null) mini = minis.FirstOrDefault(m => m.ThingID == id || m.InnerThing?.ThingID == id);
+            else
+            {
+                var cand = minis.Where(m => m.InnerThing != null && (query == null
+                    ? m.InnerThing.def.thingCategories?.Any(c => c.defName.Contains("Art")) == true || m.InnerThing.TryGetComp<CompArt>() != null
+                    : (m.InnerThing.def.defName.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 || m.InnerThing.LabelNoCount.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)))
+                    .Where(m => InstallBlueprintUtility.ExistingBlueprintFor(m) == null)       // not already placed
+                    .ToList();
+                mini = cand.OrderByDescending(m => m.InnerThing.TryGetQuality(out var q) ? (int)q : 0).FirstOrDefault();
+            }
+            if (mini == null) throw new ToolError("no minified thing to install" + (id != null ? " with id " + id : query != null ? " matching " + query : " (no art)"));
+            var rot = Rot4.North;
+            switch ((Str(a, "rot", false) ?? "north").ToLowerInvariant())
+            {
+                case "east": case "e": case "1": rot = Rot4.East; break;
+                case "south": case "s": case "2": rot = Rot4.South; break;
+                case "west": case "w": case "3": rot = Rot4.West; break;
+            }
+            var c = new IntVec3(Int(a, "x"), 0, Int(a, "z"));
+            var def = mini.InnerThing.def;
+            var rep = GenConstruct.CanPlaceBlueprintAt(def, c, rot, map, false, mini, mini.InnerThing);
+            var res = new Dictionary<string, object> { ["thing"] = mini.InnerThing.LabelCap.ToString(), ["id"] = mini.ThingID, ["cell"] = new List<object> { c.x, c.z } };
+            if (!rep.Accepted) { res["placed"] = false; res["reason"] = rep.Reason; return res; }
+            if (Bool(a, "dry", false)) { res["placed"] = false; res["dry"] = true; return res; }
+            GenSpawn.WipeExistingThings(c, rot, def.installBlueprintDef, map, DestroyMode.Deconstruct);
+            GenConstruct.PlaceBlueprintForInstall(mini, c, map, rot, Faction.OfPlayer);
+            res["placed"] = true;
+            return res;
+        }
+
         static object Build(Dictionary<string, object> a)
         {
             var map = CurMap();
@@ -699,6 +760,23 @@ namespace RimMcp
                 }
                 case "set_plant":
                 {
+                    if (a.ContainsKey("x") && !a.ContainsKey("zone"))
+                    {
+                        // hydroponics basins / plant pots in the rect (Building_PlantGrower): the gizmo opens a plant
+                        // browser window the bridge cannot read (Nice Plants Menu), so set it directly
+                        var pdef = FindThingDef(Str(a, "plant"));
+                        if (pdef.plant == null) throw new ToolError(pdef.defName + " is not a plant");
+                        var growers = Rect(a, map).Cells.Select(c => c.GetEdifice(map)).OfType<Building_PlantGrower>().Distinct().ToList();
+                        if (growers.Count == 0) throw new ToolError("no hydroponics basin / plant pot in that rect");
+                        int set = 0; var refused = new List<string>();
+                        foreach (var g in growers)
+                        {
+                            if (!pdef.plant.sowTags.Contains(g.def.building.sowTag) || !Command_SetPlantToGrow.IsPlantAvailable(pdef, map))
+                            { refused.Add($"{g.LabelCap} ({g.def.building.sowTag})"); continue; }
+                            g.SetPlantDefToGrow(pdef); set++;
+                        }
+                        return new Dictionary<string, object> { ["plant"] = pdef.defName, ["set"] = set, ["refused"] = refused.Distinct().ToList() };
+                    }
                     var z = FindZone(map, Str(a, "zone")) as Zone_Growing ?? throw new ToolError("not a growing zone");
                     var plant = CheckPlant(Str(a, "plant"), map);
                     z.SetPlantDefToGrow(plant);
@@ -1537,12 +1615,16 @@ namespace RimMcp
                 foreach (var w in Find.WindowStack.Windows.OfType<LudeonTK.EditWindow_Log>().ToList()) w.Close(false);
             var name = GenFile.SanitizedFileName(Str(a, "file", false) ?? ("rimmcp-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
             var path = GenFilePaths.ScreenshotFolderPath + System.IO.Path.DirectorySeparatorChar + name + ".png";
-            if (hideUi) Find.ScreenshotModeHandler.Active = true;
-            LongEventHandler.ExecuteWhenFinished(() =>
+            if (hideUi)
             {
-                ScreenshotTaker.TakeNonSteamShot(name);
-                if (hideUi) LongEventHandler.ExecuteWhenFinished(() => Find.ScreenshotModeHandler.Active = false);
-            });
+                // ExecuteWhenFinished runs at once when no long event is queued: the old code switched screenshot
+                // mode on and off inside the same frame and every shot kept the interface. Hide it now, shoot two
+                // frames later, restore three frames after that (Pump.Update -> FrameShots).
+                Find.ScreenshotModeHandler.Active = true;
+                pendingShot = name;
+                pendingShotFrame = UnityEngine.Time.frameCount + 2;
+            }
+            else LongEventHandler.ExecuteWhenFinished(() => ScreenshotTaker.TakeNonSteamShot(name));
             return new Dictionary<string, object>
             {
                 ["file"] = path, ["camera"] = new List<object> { rootPos.x, rootPos.z }, ["size"] = size,
