@@ -121,6 +121,10 @@ TOOLS += [
      "inputSchema": obj({"def": {"type": "string"}, **RECT, "rot": {"type": "string"}, "stuff": {"type": "string"},
                          "outline": {"type": "boolean"}, "planned": {"type": "boolean"},
                          "dry": {"type": "boolean", "description": "true: place nothing; say which cells the game would accept or reject and why (+ occupies, interactionCell)"}}, ["def", "x", "z"])},
+    {"name": "wealth", "read": True,
+     "description": "Colony wealth by def: totals (buildings, items, pawns, raidWealth = what the raid curve reads) and "
+                    "the top N building defs (def/stuff) and item defs by market value. What to cut to shrink raids.",
+     "inputSchema": obj({"top": {"type": "integer"}})},
     {"name": "install", "read": False,
      "description": "Install a minified thing (a finished sculpture, an uninstalled bench) at x,z like the Install "
                     "gizmo: a Blueprint_Install a colonist carries it to. id = the minified thing's id (or its inner "

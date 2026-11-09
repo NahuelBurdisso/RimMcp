@@ -26,6 +26,7 @@ namespace RimMcp
                 ["buildable"] = Buildable,
                 ["build"] = Build,
                 ["install"] = Install,
+                ["wealth"] = WealthBreakdown,
                 ["zone"] = ZoneTool,
                 ["zones"] = ZonesList,
                 ["research"] = Research,
@@ -552,6 +553,42 @@ namespace RimMcp
         // install {id | query, x, z, rot, dry}: place a minified thing (a finished sculpture, an uninstalled bench)
         // the way the Install gizmo does (Designator_Install: wipe, Blueprint_Install); a colonist carries it there.
         // Without id it takes the best-quality match of query among the colony's minified things; no query = any art.
+        // wealth {top}: what the colony is worth, by def (WealthWatcher's own sums: buildings at full value, items,
+        // pawns). The raid curve reads items + buildings x 0.5 (+ pawns): which buildings to cut, if any.
+        static object WealthBreakdown(Dictionary<string, object> a)
+        {
+            var map = CurMap();
+            int top = a.ContainsKey("top") ? Int(a, "top") : 25;
+            var b = new Dictionary<string, (int n, float v)>();
+            foreach (var t in map.listerBuildings.allBuildingsColonist)
+            {
+                if (t.def.category != ThingCategory.Building) continue;
+                var key = t.def.defName + (t.Stuff != null ? "/" + t.Stuff.defName : "");
+                b.TryGetValue(key, out var cur);
+                b[key] = (cur.n + 1, cur.v + t.MarketValue * t.stackCount);
+            }
+            var items = new Dictionary<string, (int n, float v)>();
+            foreach (var t in map.listerThings.AllThings)
+            {
+                if (t.def.category != ThingCategory.Item || t.Position.Fogged(map) || !t.SpawnedOrAnyParentSpawned) continue;
+                if (t.IsForbidden(Faction.OfPlayer) && !t.IsInAnyStorage()) continue;
+                var key = t.def.defName;
+                items.TryGetValue(key, out var cur);
+                items[key] = (cur.n + t.stackCount, cur.v + t.MarketValue * t.stackCount);
+            }
+            object Top(Dictionary<string, (int n, float v)> d) => d.OrderByDescending(kv => kv.Value.v).Take(top)
+                .Select(kv => (object)new Dictionary<string, object> { ["def"] = kv.Key, ["count"] = kv.Value.n, ["value"] = (float)Math.Round(kv.Value.v) }).ToList();
+            var w = map.wealthWatcher;
+            w.ForceRecount();
+            return new Dictionary<string, object>
+            {
+                ["total"] = (float)Math.Round(w.WealthTotal), ["buildings"] = (float)Math.Round(w.WealthBuildings),
+                ["items"] = (float)Math.Round(w.WealthItems), ["pawns"] = (float)Math.Round(w.WealthPawns),
+                ["raidWealth"] = (float)Math.Round(map.PlayerWealthForStoryteller),
+                ["topBuildings"] = Top(b), ["topItems"] = Top(items),
+            };
+        }
+
         static string pendingShot;
         static int pendingShotFrame = -1, restoreUiFrame = -1;
 
