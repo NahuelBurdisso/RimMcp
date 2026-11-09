@@ -19,6 +19,7 @@ namespace RimMcp
         static readonly Dictionary<Pawn, int> lastOrder = new Dictionary<Pawn, int>();
         static readonly Dictionary<string, int> lastAlarm = new Dictionary<string, int>();
         static readonly HashSet<int> flagged = new HashSet<int>();      // thing ids already reported
+        static readonly HashSet<int> thermoFlagged = new HashSet<int>();
         static readonly Dictionary<Pawn, ThingDef> lastWeapon = new Dictionary<Pawn, ThingDef>();
         static readonly FieldInfo curNodeField = typeof(Dialog_NodeTree).GetField("curNode", BindingFlags.Instance | BindingFlags.NonPublic);
         static float lastFrame;
@@ -28,7 +29,7 @@ namespace RimMcp
 
         public static void Reset()
         {
-            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear(); lastArm.Clear();
+            lastOrder.Clear(); lastAlarm.Clear(); flagged.Clear(); thermoFlagged.Clear(); lastWeapon.Clear(); lastThingOrder.Clear(); lastArm.Clear();
             LastSaveDay = int.MinValue;
         }
 
@@ -351,18 +352,22 @@ namespace RimMcp
             {
                 var tc = b.TryGetComp<CompTempControl>();
                 if (tc == null || b.def.defName.IndexOf("Cooler", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (Math.Abs(tc.TargetTemperature - tc.Props.defaultTargetTemperature) > 0.1f || flagged.Contains(b.thingIDNumber)) continue;
+                // own set: the power reflex clears `flagged` for every building it finds healthy, coolers included, so
+                // sharing it re-emitted this every pass (Quiroga: hundreds of lines in one `auto` stop)
+                if (Math.Abs(tc.TargetTemperature - tc.Props.defaultTargetTemperature) > 0.1f || thermoFlagged.Contains(b.thingIDNumber)) continue;
                 var cold = b.Position + IntVec3.South.RotatedBy(b.Rotation);
                 var room = cold.InBounds(map) ? cold.GetRoom(map) : null;
                 bool freezer = room != null && !room.PsychologicallyOutdoors && room.Cells.Any(c =>
                     c.GetSlotGroup(map) is SlotGroup sg && sg.Settings.filter.Allows(ThingDefOf.MealSimple));
-                flagged.Add(b.thingIDNumber);
+                thermoFlagged.Add(b.thingIDNumber);
                 if (freezer)
                 {
                     tc.TargetTemperature = P.freezerTargetC;
                     Did(map, "thermostats", $"{b.LabelCap} at ({b.Position.x},{b.Position.z}) -> {P.freezerTargetC}C (cold side is a food store)");
                 }
-                else Attention(map, "thermostats", $"{b.LabelCap} at ({b.Position.x},{b.Position.z}) still at 21C (default): set a target", b.Position);
+                // 21 C is right for a comfort cooler (bedroom, hospital, rec room); only a cold side outdoors is a mistake
+                else if (room == null || room.PsychologicallyOutdoors)
+                    Attention(map, "thermostats", $"{b.LabelCap} at ({b.Position.x},{b.Position.z}) blows its cold side outdoors: rotate it", b.Position);
             }
         }
 

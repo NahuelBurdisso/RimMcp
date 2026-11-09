@@ -1528,7 +1528,8 @@ namespace RimMcp
             var cam = Find.CameraDriver;
             var rootPos = (Vector3)typeof(CameraDriver).GetField("rootPos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(cam);
             if (a.ContainsKey("x") && a.ContainsKey("z")) rootPos = new Vector3(Int(a, "x") + 0.5f, rootPos.y, Int(a, "z") + 0.5f);
-            float size = a.TryGetValue("size", out var s) && s is double d ? (float)d : cam.RootSize;
+            // an integer size comes in as a long: `s is double` dropped it and kept the current zoom (size 105 -> zoomed out)
+            float size = a.TryGetValue("size", out var s) && (s is double || s is long || s is int) ? Convert.ToSingle(s) : cam.RootSize;
             cam.SetRootPosAndSize(rootPos, size);
             bool hideUi = Bool(a, "hideUi", false);
             // dev mode auto-opens the debug log on any error and it covers the middle of the shot
