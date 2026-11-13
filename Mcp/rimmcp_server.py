@@ -175,6 +175,23 @@ TOOLS += [
                     "HerbalOrWorse, NormalOrWorse, Best), selfTend, outfit (apparel policy label). Also shows area and schedule.",
      "inputSchema": obj({**NAMES, "hostility": {"type": "string"}, "medicine": {"type": "string"}, "selfTend": {"type": "boolean"},
                          "outfit": {"type": "string"}})},
+    {"name": "policies", "read": False,
+     "description": "Apparel, food and drug policies (the Assign tab). kind apparel|food|drug. action list (detail:true for "
+                    "filters/drug uses), new (policy, copy), rename (policy, new_name), delete, default, filter (policy, "
+                    "disallow_all/allow_all, then disallow then allow: lists of ThingDef / ThingCategoryDef / "
+                    "SpecialThingFilterDef / StuffCategoryDef defNames; hp [min,max] 0..1; quality [min,max]), drug (policy, "
+                    "drug defName, joy, addiction, scheduled, days, carry), assign (policy, names), colony_setup (Colony "
+                    "Template's setup: schedule, work priorities from skills, medicine, self-tend, hostility).",
+     "inputSchema": obj({"action": {"type": "string"}, "kind": {"type": "string", "enum": ["apparel", "food", "drug"]},
+                         "policy": {"type": "string"}, "copy": {"type": "string"}, "new_name": {"type": "string"},
+                         "allow": {"type": "array", "items": {"type": "string"}},
+                         "disallow": {"type": "array", "items": {"type": "string"}},
+                         "allow_all": {"type": "boolean"}, "disallow_all": {"type": "boolean"},
+                         "hp": {"type": "array", "items": {"type": "number"}},
+                         "quality": {"type": "array", "items": {"type": "string"}},
+                         "drug": {"type": "string"}, "joy": {"type": "boolean"}, "addiction": {"type": "boolean"},
+                         "scheduled": {"type": "boolean"}, "days": {"type": "integer"}, "carry": {"type": "integer"},
+                         "detail": {"type": "boolean"}, "names": NAMES["names"]})},
     {"name": "drafted_move", "read": False,
      "description": "Draft colonists (if needed) and order them to a cell; several colonists spread over nearby cells. "
                     "Drafted colonists with ranged weapons shoot enemies in range by themselves.",

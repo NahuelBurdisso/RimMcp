@@ -137,6 +137,15 @@ namespace RimMcp
                     // a map-preview mod can clear the world selection after `set tile`: put it back
                     if (page is Page_SelectStartingSite && !Find.WorldInterface.SelectedTile.Valid && Find.GameInitData.startingTile.Valid)
                         Find.WorldInterface.SelectedTile = Find.GameInitData.startingTile;
+                    // Worldbuilder's preset page: CanDoNext is always false, its own Next button calls
+                    // DoConfigurePlanet (default preset -> the vanilla world parameters page)
+                    if (page.GetType().FullName == "Worldbuilder.Page_SelectWorld")
+                    {
+                        var conf = page.GetType().GetMethod("DoConfigurePlanet", Inst)
+                            ?? throw new ToolError("Worldbuilder changed: no DoConfigurePlanet");
+                        conf.Invoke(page, null);
+                        return PageState();
+                    }
                     if (!(bool)pageCanDoNext.Invoke(page, null))
                         throw new ToolError(page.GetType().Name + " refused to continue: " + string.Join(" | ", RecentMessages()));
                     pageDoNext.Invoke(page, null);

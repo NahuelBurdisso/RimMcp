@@ -35,6 +35,7 @@ namespace RimMcp
                 ["allow_area"] = AllowArea,
                 ["schedule"] = Schedule,
                 ["pawn_settings"] = PawnSettings,
+                ["policies"] = Policies,
                 ["drafted_move"] = DraftedMove,
                 ["orders"] = Orders,
                 ["run"] = RunFor,
