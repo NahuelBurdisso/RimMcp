@@ -138,13 +138,18 @@ namespace RimMcp
             foreach (var p in pawns)
             {
                 if (lastOrder.TryGetValue(p, out var t) && now - t < 600) continue;
-                if (On("rescue") && !threat && p.Downed && !p.InBed() && !Targeted(map, p, JobDefOf.Rescue))
+                if (On("rescue") && !threat && p.Downed && !p.InBed() && Carer(map, p, JobDefOf.Rescue) == null)
                 {
                     if (Order(map, p, "DoctorRescue", "rescue", "rescue " + p.LabelShort)) continue;
                 }
-                if (On("tend") && p.InBed() && HealthAIUtility.ShouldBeTendedNowByPlayer(p) && !Targeted(map, p, JobDefOf.TendPatient))
+                if (On("tend") && p.InBed() && HealthAIUtility.ShouldBeTendedNowByPlayer(p) && Carer(map, p, JobDefOf.TendPatient) == null)
                 {
-                    if (Order(map, p, p.health.hediffSet.BleedRateTotal > 0.01f ? "DoctorTendEmergency" : "DoctorTendToHumanlikes", "tend", "tend " + p.LabelShort)) continue;
+                    // a patient has one reservation: a forced tend ends a feeding in progress. Only a bleeder is worth that;
+                    // then the feeder itself may be the one who tends.
+                    bool bleeding = p.health.hediffSet.BleedRateTotal > 0.01f;
+                    var feeder = Carer(map, p, JobDefOf.FeedPatient);
+                    if ((feeder == null || bleeding) &&
+                        Order(map, p, bleeding ? "DoctorTendEmergency" : "DoctorTendToHumanlikes", "tend", "tend " + p.LabelShort, feeder)) continue;
                 }
                 var food = p.needs?.food?.CurLevelPercentage ?? 1f;
                 if (On("clearForcedRest") && p.InBed() && !p.Downed && p.CurJob != null && p.CurJob.playerForced && food < P.forcedRestFoodPct)
@@ -155,7 +160,7 @@ namespace RimMcp
                     Did(map, "clearForcedRest", $"cleared forced bed rest of {p.LabelShort} (food {Math.Round(food * 100)}%)");
                     continue;
                 }
-                if (On("feedPatients") && p.InBed() && food < P.feedBelowPct && !Targeted(map, p, JobDefOf.FeedPatient))
+                if (On("feedPatients") && p.InBed() && food < P.feedBelowPct && Carer(map, p, JobDefOf.TendPatient, JobDefOf.FeedPatient) == null)
                 {
                     if (Order(map, p, "DoctorFeedHumanlikes", "feedPatients", $"feed {p.LabelShort} (food {Math.Round(food * 100)}%)")) continue;
                 }
@@ -211,18 +216,24 @@ namespace RimMcp
             }, "SavingLongEvent", false, null);
         }
 
-        static bool Targeted(Map map, Pawn patient, JobDef job) =>
-            map.mapPawns.FreeColonistsSpawned.Any(c => c.CurJob != null && c.CurJob.def == job && c.CurJob.targetA.Thing == patient);
+        // Who is already on this patient with one of these jobs. Rescue and TendPatient keep the patient in
+        // targetA, FeedPatient in targetB (A is the food). All of them reserve the patient, and a forced order
+        // takes that reservation: ordering a second pawn ends the first one's job. Two doctors sent in turns
+        // never finished - a colonist bled 2.5 h and went 6 h unfed (Brasa Lenta day 6).
+        static Pawn Carer(Map map, Pawn patient, params JobDef[] jobs) =>
+            map.mapPawns.SpawnedPawnsInFaction(Faction.OfPlayer).FirstOrDefault(c => c != patient && c.CurJob != null &&
+                jobs.Contains(c.CurJob.def) && (c.CurJob.targetA.Thing == patient || c.CurJob.targetB.Thing == patient));
 
         // the player's "Prioritize ..." right-click: a forced job from the same WorkGiver the menu uses
-        static bool Order(Map map, Pawn patient, string workGiver, string reflex, string what)
+        // `mayInterrupt`: a pawn whose own forced job (feeding this patient) may be replaced by this order
+        static bool Order(Map map, Pawn patient, string workGiver, string reflex, string what, Pawn mayInterrupt = null)
         {
             var wg = DefDatabase<WorkGiverDef>.GetNamedSilentFail(workGiver);
             if (!(wg?.Worker is WorkGiver_Scanner scanner)) return false;
             var helpers = map.mapPawns.FreeColonistsSpawned
                 .Where(c => c != patient && !c.Downed && !c.Drafted && !c.InMentalState && c.workSettings != null &&
                             !c.WorkTypeIsDisabled(wg.workType) && c.workSettings.WorkIsActive(wg.workType) &&
-                            !(Governor.Instance?.Manual.Contains(c) ?? false) && !(c.CurJob?.playerForced ?? false))
+                            !(Governor.Instance?.Manual.Contains(c) ?? false) && (c == mayInterrupt || !(c.CurJob?.playerForced ?? false)))
                 .ToList();
             if (helpers.Count == 0) return false;
             // the closest of the good doctors: a far one reserves the patient and blocks the one next to it
